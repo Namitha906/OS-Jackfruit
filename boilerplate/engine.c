@@ -396,6 +396,7 @@ static int run_supervisor(const char *rootfs)
     ctx.server_fd = -1;
     ctx.monitor_fd = -1;
 
+    // Initialize mutex
     rc = pthread_mutex_init(&ctx.metadata_lock, NULL);
     if (rc != 0) {
         errno = rc;
@@ -403,6 +404,7 @@ static int run_supervisor(const char *rootfs)
         return 1;
     }
 
+    // Initialize buffer
     rc = bounded_buffer_init(&ctx.log_buffer);
     if (rc != 0) {
         errno = rc;
@@ -411,6 +413,20 @@ static int run_supervisor(const char *rootfs)
         return 1;
     }
 
+    printf("Supervisor running...\n");
+
+    while (1) {
+        sleep(1);
+
+        int status;
+        pid_t pid;
+
+        while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+            printf("Container with PID %d exited\n", pid);
+        }
+    }
+
+    return 0;
     /*
      * TODO:
      *   1) open /dev/container_monitor
@@ -420,17 +436,7 @@ static int run_supervisor(const char *rootfs)
      *   5) enter the supervisor event loop
      */
    
-}printf("Supervisor running...\n");
 
-while (1) {
-    sleep(1);
-
-    int status;
-    pid_t pid;
-
-    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
-        printf("Container with PID %d exited\n", pid);
-    }
 }
 
 /*
