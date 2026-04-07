@@ -416,15 +416,20 @@ static int run_supervisor(const char *rootfs)
     printf("Supervisor running...\n");
 
     while (1) {
-        sleep(1);
+    sleep(1);
 
-        int status;
-        pid_t pid;
+    printf("Checking...\n");
 
-        while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
-            printf("Container with PID %d exited\n", pid);
-        }
+    int status;
+    pid_t pid;
+
+    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+        printf("Container with PID %d exited\n", pid);
     }
+        
+    
+}
+    
 
     return 0;
     /*
