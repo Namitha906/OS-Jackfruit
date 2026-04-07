@@ -419,12 +419,18 @@ static int run_supervisor(const char *rootfs)
      *   4) spawn the logger thread
      *   5) enter the supervisor event loop
      */
-    fprintf(stderr, "Supervisor mode not implemented yet for base-rootfs: %s\n", rootfs);
+   
+}printf("Supervisor running...\n");
 
-    bounded_buffer_begin_shutdown(&ctx.log_buffer);
-    bounded_buffer_destroy(&ctx.log_buffer);
-    pthread_mutex_destroy(&ctx.metadata_lock);
-    return 1;
+while (1) {
+    sleep(1);
+
+    int status;
+    pid_t pid;
+
+    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+        printf("Container with PID %d exited\n", pid);
+    }
 }
 
 /*
@@ -469,27 +475,70 @@ static int cmd_start(int argc, char *argv[])
 
 static int cmd_run(int argc, char *argv[])
 {
-    control_request_t req;
-
     if (argc < 5) {
         fprintf(stderr,
-                "Usage: %s run <id> <container-rootfs> <command> [--soft-mib N] [--hard-mib N] [--nice N]\n",
+                "Usage: %s run <id> <container-rootfs> <command>\n",
                 argv[0]);
         return 1;
     }
 
-    memset(&req, 0, sizeof(req));
-    req.kind = CMD_RUN;
-    strncpy(req.container_id, argv[2], sizeof(req.container_id) - 1);
-    strncpy(req.rootfs, argv[3], sizeof(req.rootfs) - 1);
-    strncpy(req.command, argv[4], sizeof(req.command) - 1);
-    req.soft_limit_bytes = DEFAULT_SOFT_LIMIT;
-    req.hard_limit_bytes = DEFAULT_HARD_LIMIT;
+    char *id = argv[2];
+    char *rootfs = argv[3];
+    char *cmd = argv[4];
 
-    if (parse_optional_flags(&req, argc, argv, 5) != 0)
+    pid_t pid = fork();
+
+    if (pid < 0) {
+        perror("fork");
         return 1;
+    }
 
-    return send_control_request(&req);
+    if (pid == 0) {
+        // CHILD = container
+
+        // 🧠 isolate namespaces
+        if (unshare(CLONE_NEWPID | CLONE_NEWUTS | CLONE_NEWNS) < 0) {
+            perror("unshare");
+            exit(1);
+        }
+
+        // 🧠 fork again for PID namespace
+        pid_t child = fork();
+        if (child < 0) {
+            perror("fork");
+            exit(1);
+        }
+
+        if (child == 0) {
+            // actual container process
+
+            if (chroot(rootfs) < 0) {
+                perror("chroot");
+                exit(1);
+            }
+
+            if (chdir("/") < 0) {
+                perror("chdir");
+                exit(1);
+            }
+
+            mkdir("/proc", 0555);
+            if (mount("proc", "/proc", "proc", 0, NULL) < 0) {
+                perror("mount /proc");
+            }
+
+            execlp(cmd, cmd, NULL);
+            perror("exec");
+            exit(1);
+        } else {
+            wait(NULL);
+            exit(0);
+        }
+    }
+
+    // 👇 PARENT
+    printf("Started container %s with PID %d\n", id, pid);
+    return 0;
 }
 
 static int cmd_ps(void)
