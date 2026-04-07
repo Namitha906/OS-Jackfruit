@@ -548,8 +548,13 @@ static int cmd_run(int argc, char *argv[])
     }
 
     // 👇 PARENT
-    printf("Started container %s with PID %d\n", id, pid);
-    return 0;
+   printf("Started container %s with PID %d\n", id, pid);
+
+int status;
+waitpid(pid, &status, 0);
+printf("Container with PID %d exited\n", pid);
+
+return 0;
 }
 
 static int cmd_ps(void)
