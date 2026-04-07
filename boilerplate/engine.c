@@ -542,7 +542,7 @@ static int cmd_run(int argc, char *argv[])
             perror("exec");
             exit(1);
         } else {
-            wait(NULL);
+            waitpid(child, NULL, 0);
             exit(0);
         }
     }
