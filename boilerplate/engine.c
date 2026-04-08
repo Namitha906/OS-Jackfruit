@@ -47,6 +47,16 @@
 #define LOG_BUFFER_CAPACITY 16
 #define DEFAULT_SOFT_LIMIT (40UL << 20)
 #define DEFAULT_HARD_LIMIT (64UL << 20)
+#define MAX_CONTAINERS 10
+
+typedef struct {
+    char id[32];
+    pid_t pid;
+    int running;
+} container_t;
+
+container_t containers[MAX_CONTAINERS];
+int container_count = 0;
 
 typedef enum {
     CMD_SUPERVISOR = 0,
@@ -549,33 +559,43 @@ static int cmd_run(int argc, char *argv[])
 
     // 👇 PARENT
    printf("Started container %s with PID %d\n", id, pid);
+    strcpy(containers[container_count].id, id);
+containers[container_count].pid = pid;
+containers[container_count].running = 1;
+container_count++;
 
 int status;
 waitpid(pid, &status, 0);
 printf("Container with PID %d exited\n", pid);
+
+for (int i = 0; i < container_count; i++) {
+    if (containers[i].pid == pid) {
+        containers[i].running = 0;
+    }
+}
 
 return 0;
 }
 
 static int cmd_ps(void)
 {
-    control_request_t req;
+    printf("ID\tPID\tSTATUS\n");
 
-    memset(&req, 0, sizeof(req));
-    req.kind = CMD_PS;
+    for (int i = 0; i < container_count; i++) {
+        printf("%s\t%d\t%s\n",
+               containers[i].id,
+               containers[i].pid,
+               containers[i].running ? "running" : "stopped");
+    }
+
+    return 0;
 
     /*
      * TODO:
      * The supervisor should respond with container metadata.
      * Keep the rendering format simple enough for demos and debugging.
      */
-    printf("Expected states include: %s, %s, %s, %s, %s\n",
-           state_to_string(CONTAINER_STARTING),
-           state_to_string(CONTAINER_RUNNING),
-           state_to_string(CONTAINER_STOPPED),
-           state_to_string(CONTAINER_KILLED),
-           state_to_string(CONTAINER_EXITED));
-    return send_control_request(&req);
+    
 }
 
 static int cmd_logs(int argc, char *argv[])
