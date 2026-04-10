@@ -386,55 +386,6 @@ int unregister_from_monitor(int monitor_fd, const char *container_id, pid_t host
     return 0;
 }
 
-static int cmd_run(int argc, char *argv[])
-{
-    if (argc < 5) {
-        fprintf(stderr,
-                "Usage: %s run <id> <rootfs> <command>\n",
-                argv[0]);
-        return 1;
-    }
-
-    char *id = argv[2];
-    char *rootfs = argv[3];
-    char *cmd = argv[4];
-
-    pid_t pid = fork();
-
-    if (pid < 0) {
-        perror("fork");
-        return 1;
-    }
-
-    if (pid == 0) {
-        // CHILD → container
-
-        if (chroot(rootfs) < 0) {
-            perror("chroot");
-            exit(1);
-        }
-
-        if (chdir("/") < 0) {
-            perror("chdir");
-            exit(1);
-        }
-
-        mkdir("/proc", 0555);
-        mount("proc", "/proc", "proc", 0, NULL);
-
-        execlp(cmd, cmd, NULL);
-
-        perror("exec failed");
-        exit(1);
-    }
-
-    printf("Started container %s with PID %d\n", id, pid);
-    return pid;  // IMPORTANT: return PID
-}
-
-
-      
-
 /*
  * TODO:
  * Implement the long-running supervisor process.
@@ -446,10 +397,9 @@ static int cmd_run(int argc, char *argv[])
  *   - accept control requests and update container state
  *   - reap children and respond to signals
  */
-
-    static int run_supervisor(const char *rootfs)
+static int run_supervisor(const char *rootfs)
 {
-    (void)rootfs;
+    (void)rootfs; // remove warning
 
     printf("Supervisor running...\n");
 
@@ -470,8 +420,8 @@ static int cmd_run(int argc, char *argv[])
             break;
         }
 
-        // RUN
-        else if (strncmp(input, "run", 3) == 0) {
+        // RUN command
+        if (strncmp(input, "run", 3) == 0) {
             char id[32], root[128], cmd[128];
 
             if (sscanf(input, "run %s %s %s", id, root, cmd) != 3) {
@@ -479,19 +429,25 @@ static int cmd_run(int argc, char *argv[])
                 continue;
             }
 
-            char *args[] = {"./engine", "run", id, root, cmd, NULL};
+            pid_t pid = fork();
 
-            pid_t pid = cmd_run(5, args);  // ✅ NO FORK HERE
+            if (pid == 0) {
+                execl("./engine", "./engine", "run", id, root, cmd, NULL);
+                perror("exec");
+                exit(1);
+            } else if (pid > 0) {
+                printf("Started container %s with PID %d\n", id, pid);
 
-            if (pid > 0) {
                 strcpy(containers[container_count].id, id);
                 containers[container_count].pid = pid;
                 containers[container_count].running = 1;
                 container_count++;
+            } else {
+                perror("fork");
             }
         }
 
-        // PS
+        // PS command
         else if (strcmp(input, "ps") == 0) {
             printf("ID\tPID\tSTATUS\n");
             for (int i = 0; i < container_count; i++) {
@@ -502,7 +458,7 @@ static int cmd_run(int argc, char *argv[])
             }
         }
 
-        // CLEAN WAIT (NO SPAM)
+        // 👇 CLEAN wait loop (NO SPAM)
         int status;
         pid_t pid;
 
@@ -574,7 +530,51 @@ static int cmd_start(int argc, char *argv[])
     return send_control_request(&req);
 }
 
+static int cmd_run(int argc, char *argv[])
+{
+   if (argc < 5) {
+        fprintf(stderr,
+                "Usage: %s run <id> <rootfs> <command>\n",
+                argv[0]);
+        return 1;
+    }
 
+    char *id = argv[2];
+    char *rootfs = argv[3];
+    char *cmd = argv[4];
+
+    pid_t pid = fork();
+
+    if (pid < 0) {
+        perror("fork");
+        return 1;
+    }
+
+    if (pid == 0) {
+        // CHILD → container
+
+        if (chroot(rootfs) < 0) {
+            perror("chroot");
+            exit(1);
+        }
+
+        if (chdir("/") < 0) {
+            perror("chdir");
+            exit(1);
+        }
+
+        mkdir("/proc", 0555);
+        mount("proc", "/proc", "proc", 0, NULL);
+
+        execlp(cmd, cmd, NULL);
+        perror("exec");
+        exit(1);
+    }
+
+    // PARENT
+    printf("Started container %s with PID %d\n", id, pid);
+    return 0;
+}
 
 static int cmd_ps(void)
 {
@@ -663,3 +663,9 @@ int main(int argc, char *argv[])
     usage(argv[0]);
     return 1;
 }
+
+  
+ 
+
+
+         
