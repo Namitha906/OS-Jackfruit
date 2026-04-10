@@ -532,9 +532,9 @@ static int cmd_start(int argc, char *argv[])
 
 static int cmd_run(int argc, char *argv[])
 {
-    if (argc < 5) {
+   if (argc < 5) {
         fprintf(stderr,
-                "Usage: %s run <id> <container-rootfs> <command>\n",
+                "Usage: %s run <id> <rootfs> <command>\n",
                 argv[0]);
         return 1;
     }
@@ -551,66 +551,29 @@ static int cmd_run(int argc, char *argv[])
     }
 
     if (pid == 0) {
-        // CHILD = container
+        // CHILD → container
 
-        // 🧠 isolate namespaces
-        if (unshare(CLONE_NEWPID | CLONE_NEWUTS | CLONE_NEWNS) < 0) {
-            perror("unshare");
+        if (chroot(rootfs) < 0) {
+            perror("chroot");
             exit(1);
         }
 
-        // 🧠 fork again for PID namespace
-        pid_t child = fork();
-        if (child < 0) {
-            perror("fork");
+        if (chdir("/") < 0) {
+            perror("chdir");
             exit(1);
         }
 
-        if (child == 0) {
-            // actual container process
+        mkdir("/proc", 0555);
+        mount("proc", "/proc", "proc", 0, NULL);
 
-            if (chroot(rootfs) < 0) {
-                perror("chroot");
-                exit(1);
-            }
-
-            if (chdir("/") < 0) {
-                perror("chdir");
-                exit(1);
-            }
-
-            mkdir("/proc", 0555);
-            if (mount("proc", "/proc", "proc", 0, NULL) < 0) {
-                perror("mount /proc");
-            }
-
-            execlp(cmd, cmd, NULL);
-            perror("exec");
-            exit(1);
-        } else {
-            waitpid(child, NULL, 0);
-            exit(0);
-        }
+        execlp(cmd, cmd, NULL);
+        perror("exec");
+        exit(1);
     }
 
-    // 👇 PARENT
-   printf("Started container %s with PID %d\n", id, pid);
-    strcpy(containers[container_count].id, id);
-containers[container_count].pid = pid;
-containers[container_count].running = 1;
-container_count++;
-
-int status;
-waitpid(pid, &status, 0);
-printf("Container with PID %d exited\n", pid);
-
-for (int i = 0; i < container_count; i++) {
-    if (containers[i].pid == pid) {
-        containers[i].running = 0;
-    }
-}
-
-return 0;
+    // PARENT
+    printf("Started container %s with PID %d\n", id, pid);
+    return 0;
 }
 
 static int cmd_ps(void)
