@@ -432,7 +432,8 @@ static int run_supervisor(const char *rootfs)
             pid_t pid = fork();
 
             if (pid == 0) {
-                execl("./engine", "./engine", "run", id, root, cmd, NULL);
+                char *args[] = {"./engine", "run", id, root, cmd, NULL};
+                cmd_run(5, args);
                 perror("exec");
                 exit(1);
             } else if (pid > 0) {
