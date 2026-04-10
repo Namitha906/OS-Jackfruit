@@ -474,7 +474,7 @@ static int run_supervisor(const char *rootfs)
      */
    
 
-}
+
 
 /*
  * TODO:
