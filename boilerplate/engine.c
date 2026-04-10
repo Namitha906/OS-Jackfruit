@@ -386,10 +386,9 @@ int unregister_from_monitor(int monitor_fd, const char *container_id, pid_t host
     return 0;
 }
 
-
 static int cmd_run(int argc, char *argv[])
 {
-   if (argc < 5) {
+    if (argc < 5) {
         fprintf(stderr,
                 "Usage: %s run <id> <rootfs> <command>\n",
                 argv[0]);
@@ -424,14 +423,17 @@ static int cmd_run(int argc, char *argv[])
         mount("proc", "/proc", "proc", 0, NULL);
 
         execlp(cmd, cmd, NULL);
-        perror("exec");
+
+        perror("exec failed");
         exit(1);
     }
 
-    // PARENT
     printf("Started container %s with PID %d\n", id, pid);
-    return 0;
+    return pid;  // IMPORTANT: return PID
 }
+
+
+      
 
 /*
  * TODO:
@@ -444,9 +446,10 @@ static int cmd_run(int argc, char *argv[])
  *   - accept control requests and update container state
  *   - reap children and respond to signals
  */
-static int run_supervisor(const char *rootfs)
+
+    static int run_supervisor(const char *rootfs)
 {
-    (void)rootfs; // remove warning
+    (void)rootfs;
 
     printf("Supervisor running...\n");
 
@@ -467,8 +470,8 @@ static int run_supervisor(const char *rootfs)
             break;
         }
 
-        // RUN command
-        if (strncmp(input, "run", 3) == 0) {
+        // RUN
+        else if (strncmp(input, "run", 3) == 0) {
             char id[32], root[128], cmd[128];
 
             if (sscanf(input, "run %s %s %s", id, root, cmd) != 3) {
@@ -476,26 +479,19 @@ static int run_supervisor(const char *rootfs)
                 continue;
             }
 
-            pid_t pid = fork();
+            char *args[] = {"./engine", "run", id, root, cmd, NULL};
 
-            if (pid == 0) {
-                char *args[] = {"./engine", "run", id, root, cmd, NULL};
-                cmd_run(5, args);
-                perror("exec");
-                exit(1);
-            } else if (pid > 0) {
-                printf("Started container %s with PID %d\n", id, pid);
+            pid_t pid = cmd_run(5, args);  // ✅ NO FORK HERE
 
+            if (pid > 0) {
                 strcpy(containers[container_count].id, id);
                 containers[container_count].pid = pid;
                 containers[container_count].running = 1;
                 container_count++;
-            } else {
-                perror("fork");
             }
         }
 
-        // PS command
+        // PS
         else if (strcmp(input, "ps") == 0) {
             printf("ID\tPID\tSTATUS\n");
             for (int i = 0; i < container_count; i++) {
@@ -506,7 +502,7 @@ static int run_supervisor(const char *rootfs)
             }
         }
 
-        // 👇 CLEAN wait loop (NO SPAM)
+        // CLEAN WAIT (NO SPAM)
         int status;
         pid_t pid;
 
