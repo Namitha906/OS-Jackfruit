@@ -386,6 +386,53 @@ int unregister_from_monitor(int monitor_fd, const char *container_id, pid_t host
     return 0;
 }
 
+
+static int cmd_run(int argc, char *argv[])
+{
+   if (argc < 5) {
+        fprintf(stderr,
+                "Usage: %s run <id> <rootfs> <command>\n",
+                argv[0]);
+        return 1;
+    }
+
+    char *id = argv[2];
+    char *rootfs = argv[3];
+    char *cmd = argv[4];
+
+    pid_t pid = fork();
+
+    if (pid < 0) {
+        perror("fork");
+        return 1;
+    }
+
+    if (pid == 0) {
+        // CHILD → container
+
+        if (chroot(rootfs) < 0) {
+            perror("chroot");
+            exit(1);
+        }
+
+        if (chdir("/") < 0) {
+            perror("chdir");
+            exit(1);
+        }
+
+        mkdir("/proc", 0555);
+        mount("proc", "/proc", "proc", 0, NULL);
+
+        execlp(cmd, cmd, NULL);
+        perror("exec");
+        exit(1);
+    }
+
+    // PARENT
+    printf("Started container %s with PID %d\n", id, pid);
+    return 0;
+}
+
 /*
  * TODO:
  * Implement the long-running supervisor process.
@@ -531,51 +578,7 @@ static int cmd_start(int argc, char *argv[])
     return send_control_request(&req);
 }
 
-static int cmd_run(int argc, char *argv[])
-{
-   if (argc < 5) {
-        fprintf(stderr,
-                "Usage: %s run <id> <rootfs> <command>\n",
-                argv[0]);
-        return 1;
-    }
 
-    char *id = argv[2];
-    char *rootfs = argv[3];
-    char *cmd = argv[4];
-
-    pid_t pid = fork();
-
-    if (pid < 0) {
-        perror("fork");
-        return 1;
-    }
-
-    if (pid == 0) {
-        // CHILD → container
-
-        if (chroot(rootfs) < 0) {
-            perror("chroot");
-            exit(1);
-        }
-
-        if (chdir("/") < 0) {
-            perror("chdir");
-            exit(1);
-        }
-
-        mkdir("/proc", 0555);
-        mount("proc", "/proc", "proc", 0, NULL);
-
-        execlp(cmd, cmd, NULL);
-        perror("exec");
-        exit(1);
-    }
-
-    // PARENT
-    printf("Started container %s with PID %d\n", id, pid);
-    return 0;
-}
 
 static int cmd_ps(void)
 {
