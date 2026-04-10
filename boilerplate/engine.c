@@ -552,7 +552,7 @@ static int cmd_start(int argc, char *argv[])
     return send_control_request(&req);
 }
 
-/*static int cmd_run(int argc, char *argv[])
+static int cmd_run(int argc, char *argv[])
 {
     if (argc < 5) {
         fprintf(stderr,
@@ -653,6 +653,7 @@ static int cmd_ps(void)
      * The supervisor should respond with container metadata.
      * Keep the rendering format simple enough for demos and debugging.
      */
+}
     
 
 
