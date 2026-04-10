@@ -399,72 +399,71 @@ int unregister_from_monitor(int monitor_fd, const char *container_id, pid_t host
  */
 static int run_supervisor(const char *rootfs)
 {
-    supervisor_ctx_t ctx;
-    int rc;
-
-    memset(&ctx, 0, sizeof(ctx));
-    ctx.server_fd = -1;
-    ctx.monitor_fd = -1;
-
-    // Initialize mutex
-    rc = pthread_mutex_init(&ctx.metadata_lock, NULL);
-    if (rc != 0) {
-        errno = rc;
-        perror("pthread_mutex_init");
-        return 1;
-    }
-
-    // Initialize buffer
-    rc = bounded_buffer_init(&ctx.log_buffer);
-    if (rc != 0) {
-        errno = rc;
-        perror("bounded_buffer_init");
-        pthread_mutex_destroy(&ctx.metadata_lock);
-        return 1;
-    }
-
     printf("Supervisor running...\n");
 
     char input[256];
 
-while (1) {
-    printf("engine> ");
-    fflush(stdout);
+    while (1) {
+        printf("engine> ");
+        fflush(stdout);
 
-    // 👇 read user input
-    if (fgets(input, sizeof(input), stdin) == NULL) {
-        continue;
+        // read input
+        if (fgets(input, sizeof(input), stdin) == NULL) {
+            continue;
+        }
+
+        // remove newline
+        input[strcspn(input, "\n")] = 0;
+
+        // EXIT command
+        if (strcmp(input, "exit") == 0) {
+            printf("Exiting supervisor...\n");
+            break;
+        }
+
+        // RUN command
+        if (strncmp(input, "run", 3) == 0) {
+            // simple parsing
+            char id[32], root[128], cmd[128];
+            sscanf(input, "run %s %s %s", id, root, cmd);
+
+            pid_t pid = fork();
+
+            if (pid == 0) {
+                execl("./engine", "./engine", "run", id, root, cmd, NULL);
+                perror("exec");
+                exit(1);
+            } else if (pid > 0) {
+                printf("Started container %s with PID %d\n", id, pid);
+            } else {
+                perror("fork");
+            }
+        }
+
+        // check exited containers
+        int status;
+        pid_t pid;
+
+        while (1) {
+            pid = waitpid(-1, &status, WNOHANG);
+
+            if (pid > 0) {
+                printf("Container with PID %d exited\n", pid);
+            } else {
+                break;
+            }
+        }
     }
 
-    // remove newline
-    input[strcspn(input, "\n")] = 0;
-
-    // 👇 exit command
-    if (strcmp(input, "exit") == 0) {
-        printf("Exiting supervisor...\n");
-        break;
-    }
-
-    // 👇 simple run command
-    if (strncmp(input, "run", 3) == 0) {
-        printf("Running command: %s\n", input);
-
-        // OPTIONAL: call cmd_run here later
-    }
-
-    // 👇 check exited containers
-    int status;
-    pid_t pid;
-
-    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
-        printf("Container with PID %d exited\n", pid);
-    }
+    return 0;
+      
+   
 
 
 }
     
 
-    return 0;
+  
     /*
      * TODO:
      *   1) open /dev/container_monitor
