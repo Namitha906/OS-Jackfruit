@@ -444,15 +444,9 @@ static int run_supervisor(const char *rootfs)
         int status;
         pid_t pid;
 
-        while (1) {
-            pid = waitpid(-1, &status, WNOHANG);
-
-            if (pid > 0) {
-                printf("Container with PID %d exited\n", pid);
-            } else {
-                break;
-            }
-        }
+        while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+    printf("Container with PID %d exited\n", pid);
+}
     }
 
     return 0;
