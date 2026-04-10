@@ -399,6 +399,8 @@ int unregister_from_monitor(int monitor_fd, const char *container_id, pid_t host
  */
 static int run_supervisor(const char *rootfs)
 {
+    (void)rootfs; // remove warning
+
     printf("Supervisor running...\n");
 
     char input[256];
@@ -407,15 +409,12 @@ static int run_supervisor(const char *rootfs)
         printf("engine> ");
         fflush(stdout);
 
-        // read input
-        if (fgets(input, sizeof(input), stdin) == NULL) {
+        if (fgets(input, sizeof(input), stdin) == NULL)
             continue;
-        }
 
-        // remove newline
         input[strcspn(input, "\n")] = 0;
 
-        // EXIT command
+        // EXIT
         if (strcmp(input, "exit") == 0) {
             printf("Exiting supervisor...\n");
             break;
@@ -423,9 +422,12 @@ static int run_supervisor(const char *rootfs)
 
         // RUN command
         if (strncmp(input, "run", 3) == 0) {
-            // simple parsing
             char id[32], root[128], cmd[128];
-            sscanf(input, "run %s %s %s", id, root, cmd);
+
+            if (sscanf(input, "run %s %s %s", id, root, cmd) != 3) {
+                printf("Invalid command\n");
+                continue;
+            }
 
             pid_t pid = fork();
 
@@ -435,25 +437,43 @@ static int run_supervisor(const char *rootfs)
                 exit(1);
             } else if (pid > 0) {
                 printf("Started container %s with PID %d\n", id, pid);
+
+                strcpy(containers[container_count].id, id);
+                containers[container_count].pid = pid;
+                containers[container_count].running = 1;
+                container_count++;
             } else {
                 perror("fork");
             }
         }
 
-        // check exited containers
+        // PS command
+        else if (strcmp(input, "ps") == 0) {
+            printf("ID\tPID\tSTATUS\n");
+            for (int i = 0; i < container_count; i++) {
+                printf("%s\t%d\t%s\n",
+                       containers[i].id,
+                       containers[i].pid,
+                       containers[i].running ? "running" : "stopped");
+            }
+        }
+
+        // 👇 CLEAN wait loop (NO SPAM)
         int status;
         pid_t pid;
 
         while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
-    printf("Container with PID %d exited\n", pid);
-}
+            printf("Container with PID %d exited\n", pid);
+
+            for (int i = 0; i < container_count; i++) {
+                if (containers[i].pid == pid) {
+                    containers[i].running = 0;
+                }
+            }
+        }
     }
 
     return 0;
-      
-   
-
-
 }
     
 
