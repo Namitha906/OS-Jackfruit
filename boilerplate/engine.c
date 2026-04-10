@@ -425,19 +425,77 @@ static int run_supervisor(const char *rootfs)
 
     printf("Supervisor running...\n");
 
+    
     while (1) {
-    sleep(1);
+    printf("engine> ");
 
-    printf("Checking...\n");
+    char command[20];
+    scanf("%s", command);
 
+    if (strcmp(command, "run") == 0) {
+        char id[32], rootfs[100], cmd[100];
+        scanf("%s %s %s", id, rootfs, cmd);
+
+        pid_t pid = fork();
+
+        if (pid == 0) {
+            // CHILD → container
+
+            if (unshare(CLONE_NEWPID | CLONE_NEWUTS | CLONE_NEWNS) < 0) {
+                perror("unshare");
+                exit(1);
+            }
+
+            pid_t child = fork();
+            if (child == 0) {
+                chroot(rootfs);
+                chdir("/");
+
+                mkdir("/proc", 0555);
+                mount("proc", "/proc", "proc", 0, NULL);
+
+                execlp(cmd, cmd, NULL);
+                perror("exec");
+                exit(1);
+            } else {
+                wait(NULL);
+                exit(0);
+            }
+        }
+
+        // PARENT → store container
+        printf("Started container %s with PID %d\n", id, pid);
+
+        strcpy(containers[container_count].id, id);
+        containers[container_count].pid = pid;
+        containers[container_count].running = 1;
+        container_count++;
+    }
+
+    else if (strcmp(command, "ps") == 0) {
+        printf("ID\tPID\tSTATUS\n");
+
+        for (int i = 0; i < container_count; i++) {
+            printf("%s\t%d\t%s\n",
+                   containers[i].id,
+                   containers[i].pid,
+                   containers[i].running ? "running" : "stopped");
+        }
+    }
+
+    // 👇 VERY IMPORTANT — detect exited containers
     int status;
     pid_t pid;
 
     while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
         printf("Container with PID %d exited\n", pid);
+
+        for (int i = 0; i < container_count; i++) {
+            if (containers[i].pid == pid) {
+                containers[i].running = 0;
+            }
+        }
     }
-        
-    
 }
     
 
@@ -494,7 +552,7 @@ static int cmd_start(int argc, char *argv[])
     return send_control_request(&req);
 }
 
-static int cmd_run(int argc, char *argv[])
+/*static int cmd_run(int argc, char *argv[])
 {
     if (argc < 5) {
         fprintf(stderr,
@@ -596,7 +654,7 @@ static int cmd_ps(void)
      * Keep the rendering format simple enough for demos and debugging.
      */
     
-}
+
 
 static int cmd_logs(int argc, char *argv[])
 {
