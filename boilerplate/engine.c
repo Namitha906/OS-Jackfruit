@@ -37,10 +37,6 @@
 
 #include "monitor_ioctl.h"
 
-
-static int cmd_run(int argc, char *argv[]);
-void *producer_thread(void *arg);
-
 #define STACK_SIZE (1024 * 1024)
 #define CONTAINER_ID_LEN 32
 #define CONTROL_PATH "/tmp/mini_runtime.sock"
@@ -141,15 +137,6 @@ typedef struct {
     pthread_mutex_t metadata_lock;
     container_record_t *containers;
 } supervisor_ctx_t;
-
-supervisor_ctx_t *GLOBAL_CTX = NULL;   
-
-typedef struct {
-    int pipe_fd;
-    char container_id[CONTAINER_ID_LEN];
-    supervisor_ctx_t *ctx;   // ✅ ADD THIS
-} producer_arg_t;
-
 
 static void usage(const char *prog)
 {
@@ -312,27 +299,10 @@ static void bounded_buffer_begin_shutdown(bounded_buffer_t *buffer)
  */
 int bounded_buffer_push(bounded_buffer_t *buffer, const log_item_t *item)
 {
-    pthread_mutex_lock(&buffer->mutex);
-
-    while (buffer->count == LOG_BUFFER_CAPACITY && !buffer->shutting_down) {
-        pthread_cond_wait(&buffer->not_full, &buffer->mutex);
-    }
-
-    if (buffer->shutting_down) {
-        pthread_mutex_unlock(&buffer->mutex);
-        return -1;
-    }
-
-    buffer->items[buffer->tail] = *item;
-    buffer->tail = (buffer->tail + 1) % LOG_BUFFER_CAPACITY;
-    buffer->count++;
-
-    pthread_cond_signal(&buffer->not_empty);
-    pthread_mutex_unlock(&buffer->mutex);
-
-    return 0;
+    (void)buffer;
+    (void)item;
+    return -1;
 }
-
 
 /*
  * TODO:
@@ -343,29 +313,13 @@ int bounded_buffer_push(bounded_buffer_t *buffer, const log_item_t *item)
  *   - return a useful status when shutdown is in progress
  *   - avoid races with producers and shutdown
  */
-
 int bounded_buffer_pop(bounded_buffer_t *buffer, log_item_t *item)
 {
-    pthread_mutex_lock(&buffer->mutex);
-
-    while (buffer->count == 0 && !buffer->shutting_down) {
-        pthread_cond_wait(&buffer->not_empty, &buffer->mutex);
-    }
-
-    if (buffer->count == 0 && buffer->shutting_down) {
-        pthread_mutex_unlock(&buffer->mutex);
-        return -1;
-    }
-
-    *item = buffer->items[buffer->head];
-    buffer->head = (buffer->head + 1) % LOG_BUFFER_CAPACITY;
-    buffer->count--;
-
-    pthread_cond_signal(&buffer->not_full);
-    pthread_mutex_unlock(&buffer->mutex);
-
-    return 0;
+    (void)buffer;
+    (void)item;
+    return -1;
 }
+
 /*
  * TODO:
  * Implement the logging consumer thread.
@@ -375,45 +329,11 @@ int bounded_buffer_pop(bounded_buffer_t *buffer, log_item_t *item)
  *   - route each chunk to the correct per-container log file
  *   - exit cleanly when shutdown begins and pending work is drained
  */
-
-
 void *logging_thread(void *arg)
 {
-    supervisor_ctx_t *ctx = (supervisor_ctx_t *)arg;
-    log_item_t item;
-
-    while (1) {
-        if (bounded_buffer_pop(&ctx->log_buffer, &item) != 0)
-            break;
-
-        char path[256];
-        snprintf(path, sizeof(path), "logs/%s.log", item.container_id);
-
-        int fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
-        if (fd < 0) {
-            perror("open log file");
-            continue;
-        }
-
-        ssize_t total = 0;
-
-        while (total < item.length) {
-            ssize_t n = write(fd, item.data + total, item.length - total);
-            if (n < 0) {
-                perror("write");
-                break;
-            }
-            total += n;
-        }
-
-        printf("WROTE %ld bytes to file\n", total);  // ✅ DEBUG
-
-        close(fd);
-    }
-
+    (void)arg;
     return NULL;
 }
-
 
 /*
  * TODO:
@@ -428,38 +348,7 @@ void *logging_thread(void *arg)
  */
 int child_fn(void *arg)
 {
-    child_config_t *config = (child_config_t *)arg;
-
-    // Set hostname (UTS namespace)
-    sethostname(config->id, strlen(config->id));
-
-    // Change root filesystem
-    if (chroot(config->rootfs) < 0) {
-        perror("chroot");
-        return 1;
-    }
-
-    if (chdir("/") < 0) {
-        perror("chdir");
-        return 1;
-    }
-
-    // Mount proc
-    mkdir("/proc", 0555);
-    if (mount("proc", "/proc", "proc", 0, NULL) < 0) {
-        perror("mount /proc");
-        return 1;
-    }
-
-    // Redirect stdout + stderr to pipe
-    dup2(config->log_write_fd, STDOUT_FILENO);
-    dup2(config->log_write_fd, STDERR_FILENO);
-    close(config->log_write_fd);
-
-    // Execute command
-    execl("/bin/sh", "sh", "-c", config->command, NULL);
-
-    perror("exec failed");
+    (void)arg;
     return 1;
 }
 
@@ -497,58 +386,6 @@ int unregister_from_monitor(int monitor_fd, const char *container_id, pid_t host
     return 0;
 }
 
-static int cmd_run(int argc, char *argv[])
-{
-    if (argc < 5) {
-        fprintf(stderr,
-                "Usage: %s run <id> <rootfs> <command>\n",
-                argv[0]);
-        return 1;
-    }
-
-    char *id = argv[2];
-    char *rootfs = argv[3];
-    char *cmd = argv[4];
-
-    int pipefd[2];
-
-    if (pipe(pipefd) < 0) {
-        perror("pipe");
-        return 1;
-    }
-
-    // allocate stack for clone
-    char *stack = malloc(STACK_SIZE);
-    if (!stack) {
-        perror("malloc");
-        return 1;
-    }
-
-    // setup config
-    child_config_t *config = malloc(sizeof(child_config_t));
-    if (!config) {
-        perror("malloc");
-        return 1;
-    }
-
-    strncpy(config->id, id, CONTAINER_ID_LEN);
-    strncpy(config->rootfs, rootfs, PATH_MAX);
-    strncpy(config->command, cmd, CHILD_COMMAND_LEN);
-    config->log_write_fd = pipefd[1];
-
-    // create container using clone
-    pid_t pid = clone(child_fn,
-                      stack + STACK_SIZE,
-                      CLONE_NEWPID | CLONE_NEWNS | CLONE_NEWUTS | SIGCHLD,
-                      config);
-
-    if (pid < 0) {
-        perror("clone");
-        return 1;
-    }
-
-    // parent closes write end
-   
 /*
  * TODO:
  * Implement the long-running supervisor process.
@@ -562,23 +399,9 @@ static int cmd_run(int argc, char *argv[])
  */
 static int run_supervisor(const char *rootfs)
 {
-
-    mkdir("logs", 0755);
-    (void)rootfs;
+    (void)rootfs; // remove warning
 
     printf("Supervisor running...\n");
-
-    supervisor_ctx_t ctx;
-    GLOBAL_CTX = &ctx;
-
-    // initialize buffer
-    if (bounded_buffer_init(&ctx.log_buffer) != 0) {
-        perror("bounded_buffer_init");
-        return 1;
-    }
-
-    // start logging thread
-    pthread_create(&ctx.logger_thread, NULL, logging_thread, &ctx);
 
     char input[256];
 
@@ -598,7 +421,7 @@ static int run_supervisor(const char *rootfs)
         }
 
         // RUN command
-        else if (strncmp(input, "run", 3) == 0) {
+        if (strncmp(input, "run", 3) == 0) {
             char id[32], root[128], cmd[128];
 
             if (sscanf(input, "run %s %s %s", id, root, cmd) != 3) {
@@ -606,15 +429,21 @@ static int run_supervisor(const char *rootfs)
                 continue;
             }
 
-            char *args[] = {"./engine", "run", id, root, cmd, NULL};
+            pid_t pid = fork();
 
-            pid_t pid = cmd_run(5, args);   // ✅ FIXED
+            if (pid == 0) {
+                execl("./engine", "./engine", "run", id, root, cmd, NULL);
+                perror("exec");
+                exit(1);
+            } else if (pid > 0) {
+                printf("Started container %s with PID %d\n", id, pid);
 
-            if (pid > 0) {
                 strcpy(containers[container_count].id, id);
                 containers[container_count].pid = pid;
                 containers[container_count].running = 1;
                 container_count++;
+            } else {
+                perror("fork");
             }
         }
 
@@ -629,7 +458,7 @@ static int run_supervisor(const char *rootfs)
             }
         }
 
-        // CLEAN wait loop (NO SPAM)
+        // 👇 CLEAN wait loop (NO SPAM)
         int status;
         pid_t pid;
 
@@ -644,12 +473,9 @@ static int run_supervisor(const char *rootfs)
         }
     }
 
-    // shutdown logging system
-    bounded_buffer_begin_shutdown(&ctx.log_buffer);
-    pthread_join(ctx.logger_thread, NULL);
-
     return 0;
 }
+    
 
   
     /*
@@ -703,39 +529,52 @@ static int cmd_start(int argc, char *argv[])
 
     return send_control_request(&req);
 }
-void *producer_thread(void *arg)
+
+static int cmd_run(int argc, char *argv[])
 {
-    producer_arg_t *parg = arg;
-
-    int fd = parg->pipe_fd;
-
-    log_item_t item;
-    strncpy(item.container_id, parg->container_id, CONTAINER_ID_LEN);
-
-    while (1) {
-        ssize_t n = read(fd, item.data, LOG_CHUNK_SIZE);
-
-        if (n <= 0)
-            break;
-
-         printf("READ %ld bytes from container\n", n);
-
-        item.length = n;
-
-        bounded_buffer_push(&parg->ctx->log_buffer, &item);
+   if (argc < 5) {
+        fprintf(stderr,
+                "Usage: %s run <id> <rootfs> <command>\n",
+                argv[0]);
+        return 1;
     }
 
-    close(fd);
-    free(parg);
+    char *id = argv[2];
+    char *rootfs = argv[3];
+    char *cmd = argv[4];
 
-    return NULL;
+    pid_t pid = fork();
+
+    if (pid < 0) {
+        perror("fork");
+        return 1;
+    }
+
+    if (pid == 0) {
+        // CHILD → container
+
+        if (chroot(rootfs) < 0) {
+            perror("chroot");
+            exit(1);
+        }
+
+        if (chdir("/") < 0) {
+            perror("chdir");
+            exit(1);
+        }
+
+        mkdir("/proc", 0555);
+        mount("proc", "/proc", "proc", 0, NULL);
+
+        execlp(cmd, cmd, NULL);
+        perror("exec");
+        exit(1);
+    }
+
+    // PARENT
+    printf("Started container %s with PID %d\n", id, pid);
+    return 0;
 }
-
-
-      
-
-
-
 
 static int cmd_ps(void)
 {
