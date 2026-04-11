@@ -38,6 +38,7 @@
 #include "monitor_ioctl.h"
 
 static int cmd_run(int argc, char *argv[]);
+static int cmd_start(int argc, char *argv[]);
 
 #define STACK_SIZE (1024 * 1024)
 #define CONTAINER_ID_LEN 32
@@ -633,6 +634,28 @@ static int send_control_request(const control_request_t *req)
     close(fd);
     return 0;
 }
+
+static int cmd_start(int argc, char *argv[])
+{
+    control_request_t req;
+
+    if (argc < 5) {
+        fprintf(stderr,
+                "Usage: %s start <id> <rootfs> <command>\n",
+                argv[0]);
+        return 1;
+    }
+
+    memset(&req, 0, sizeof(req));
+    req.kind = CMD_START;
+
+    strncpy(req.container_id, argv[2], CONTAINER_ID_LEN - 1);
+    strncpy(req.rootfs, argv[3], PATH_MAX - 1);
+    strncpy(req.command, argv[4], CHILD_COMMAND_LEN - 1);
+
+    return send_control_request(&req);
+}
+
 
 static int cmd_run(int argc, char *argv[])
 {
