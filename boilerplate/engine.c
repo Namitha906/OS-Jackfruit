@@ -593,6 +593,7 @@ static int run_supervisor(const char *rootfs)
  * logging pipe. A UNIX domain socket is the most direct option, but a
  * FIFO or shared memory design is also acceptable if justified.
  */
+
 static int send_control_request(const control_request_t *req)
 {
     int fd;
@@ -610,20 +611,26 @@ static int send_control_request(const control_request_t *req)
 
     if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
         perror("connect");
+        close(fd);
         return 1;
     }
 
-    write(fd, req, sizeof(*req));
+    // send request
+    if (write(fd, req, sizeof(*req)) < 0) {
+        perror("write");
+        close(fd);
+        return 1;
+    }
 
+    // receive response
     control_response_t res;
-    read(fd, &res, sizeof(res));
-
-    printf("%s\n", res.message);
+    if (read(fd, &res, sizeof(res)) > 0) {
+        printf("%s\n", res.message);
+    }
 
     close(fd);
     return 0;
 }
-
 
 static int cmd_run(int argc, char *argv[])
 {
