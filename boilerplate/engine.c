@@ -428,7 +428,38 @@ void *logging_thread(void *arg)
  */
 int child_fn(void *arg)
 {
-    (void)arg;
+    child_config_t *config = (child_config_t *)arg;
+
+    // Set hostname (UTS namespace)
+    sethostname(config->id, strlen(config->id));
+
+    // Change root filesystem
+    if (chroot(config->rootfs) < 0) {
+        perror("chroot");
+        return 1;
+    }
+
+    if (chdir("/") < 0) {
+        perror("chdir");
+        return 1;
+    }
+
+    // Mount proc
+    mkdir("/proc", 0555);
+    if (mount("proc", "/proc", "proc", 0, NULL) < 0) {
+        perror("mount /proc");
+        return 1;
+    }
+
+    // Redirect stdout + stderr to pipe
+    dup2(config->log_write_fd, STDOUT_FILENO);
+    dup2(config->log_write_fd, STDERR_FILENO);
+    close(config->log_write_fd);
+
+    // Execute command
+    execl("/bin/sh", "sh", "-c", config->command, NULL);
+
+    perror("exec failed");
     return 1;
 }
 
@@ -488,28 +519,43 @@ static int cmd_run(int argc, char *argv[])
         return 1;
     }
 
-    pid_t pid = fork();
+   char *stack = malloc(STACK_SIZE);
+if (!stack) {
+    perror("malloc");
+    return 1;
+}
+
+child_config_t *config = malloc(sizeof(child_config_t));
+if (!config) {
+    perror("malloc");
+    return 1;
+}
+
+strncpy(config->id, id, CONTAINER_ID_LEN);
+strncpy(config->rootfs, rootfs, PATH_MAX);
+strncpy(config->command, cmd, CHILD_COMMAND_LEN);
+config->log_write_fd = pipefd[1];
+
+// clone instead of fork
+pid_t pid = clone(child_fn,
+                  stack + STACK_SIZE,
+                  CLONE_NEWPID | CLONE_NEWNS | CLONE_NEWUTS | SIGCHLD,
+                  config);
+
+if (pid < 0) {
+    perror("clone");
+    return 1;
+}
+
+// parent closes write end
+close(pipefd[1]);
 
     if (pid < 0) {
         perror("fork");
         return 1;
     }
 
-    if (pid == 0) {
-        // ===== CHILD → container =====
-
-        // redirect stdout + stderr to pipe
-        dup2(pipefd[1], STDOUT_FILENO);
-        dup2(pipefd[1], STDERR_FILENO);
-
-        close(pipefd[0]);
-        close(pipefd[1]);
-
-        if (chroot(rootfs) < 0) {
-            perror("chroot");
-            exit(1);
-        }
-
+   
         if (chdir("/") < 0) {
             perror("chdir");
             exit(1);
