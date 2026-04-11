@@ -312,8 +312,24 @@ static void bounded_buffer_begin_shutdown(bounded_buffer_t *buffer)
  */
 int bounded_buffer_push(bounded_buffer_t *buffer, const log_item_t *item)
 {
+    pthread_mutex_lock(&buffer->mutex);
+
+    while (buffer->count == LOG_BUFFER_CAPACITY && !buffer->shutting_down) {
+        pthread_cond_wait(&buffer->not_full, &buffer->mutex);
+    }
+
+    if (buffer->shutting_down) {
+        pthread_mutex_unlock(&buffer->mutex);
+        return -1;
+    }
+
     buffer->items[buffer->tail] = *item;
     buffer->tail = (buffer->tail + 1) % LOG_BUFFER_CAPACITY;
+    buffer->count++;
+
+    pthread_cond_signal(&buffer->not_empty);
+    pthread_mutex_unlock(&buffer->mutex);
+
     return 0;
 }
 
@@ -328,14 +344,28 @@ int bounded_buffer_push(bounded_buffer_t *buffer, const log_item_t *item)
  *   - avoid races with producers and shutdown
  */
 
-
 int bounded_buffer_pop(bounded_buffer_t *buffer, log_item_t *item)
 {
+    pthread_mutex_lock(&buffer->mutex);
+
+    while (buffer->count == 0 && !buffer->shutting_down) {
+        pthread_cond_wait(&buffer->not_empty, &buffer->mutex);
+    }
+
+    if (buffer->count == 0 && buffer->shutting_down) {
+        pthread_mutex_unlock(&buffer->mutex);
+        return -1;
+    }
+
     *item = buffer->items[buffer->head];
     buffer->head = (buffer->head + 1) % LOG_BUFFER_CAPACITY;
+    buffer->count--;
+
+    pthread_cond_signal(&buffer->not_full);
+    pthread_mutex_unlock(&buffer->mutex);
+
     return 0;
 }
-
 /*
  * TODO:
  * Implement the logging consumer thread.
