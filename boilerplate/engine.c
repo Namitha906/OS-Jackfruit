@@ -392,14 +392,25 @@ void *logging_thread(void *arg)
         snprintf(path, sizeof(path), "logs/%s.log", item.container_id);
 
         int fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
-        if (fd < 0) {
-            perror("open log file");
-            continue;
-        }
+if (fd < 0) {
+    perror("open log file");
+    continue;
+}
 
-        write(fd, item.data, item.length);
+ssize_t total = 0;
+while (total < item.length) {
+    ssize_t n = write(fd, item.data + total, item.length - total);
+    if (n <= 0) {
+        perror("write failed");
+        break;
+    }
+    total += n;
+}
 
-        close(fd);
+// 👇 PUT IT HERE
+printf("WROTE %ld bytes to file\n", total);
+
+close(fd);
     }
 
     return NULL;
