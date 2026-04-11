@@ -376,41 +376,39 @@ int bounded_buffer_pop(bounded_buffer_t *buffer, log_item_t *item)
  *   - exit cleanly when shutdown begins and pending work is drained
  */
 
+
 void *logging_thread(void *arg)
 {
     supervisor_ctx_t *ctx = (supervisor_ctx_t *)arg;
-
     log_item_t item;
 
     while (1) {
         if (bounded_buffer_pop(&ctx->log_buffer, &item) != 0)
             break;
 
-        printf("WRITING LOG for %s\n", item.container_id);
-         
-        char path[PATH_MAX];
+        char path[256];
         snprintf(path, sizeof(path), "logs/%s.log", item.container_id);
 
         int fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
-if (fd < 0) {
-    perror("open log file");
-    continue;
-}
+        if (fd < 0) {
+            perror("open log file");
+            continue;
+        }
 
-ssize_t total = 0;
-while (total < item.length) {
-    ssize_t n = write(fd, item.data + total, item.length - total);
-    if (n <= 0) {
-        perror("write failed");
-        break;
-    }
-    total += n;
-}
+        ssize_t total = 0;
 
-// 👇 PUT IT HERE
-printf("WROTE %ld bytes to file\n", total);
+        while (total < item.length) {
+            ssize_t n = write(fd, item.data + total, item.length - total);
+            if (n < 0) {
+                perror("write");
+                break;
+            }
+            total += n;
+        }
 
-close(fd);
+        printf("WROTE %ld bytes to file\n", total);  // ✅ DEBUG
+
+        close(fd);
     }
 
     return NULL;
