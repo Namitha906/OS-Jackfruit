@@ -310,13 +310,12 @@ static void bounded_buffer_begin_shutdown(bounded_buffer_t *buffer)
  *   - wake consumers correctly
  *   - stop cleanly if shutdown begins
  */
-int bounded_buffer_push(...)
+int bounded_buffer_push(bounded_buffer_t *buffer, const log_item_t *item)
 {
     buffer->items[buffer->tail] = *item;
     buffer->tail = (buffer->tail + 1) % LOG_BUFFER_CAPACITY;
     return 0;
 }
-
 
 
 /*
@@ -330,7 +329,7 @@ int bounded_buffer_push(...)
  */
 
 
-int bounded_buffer_pop(...)
+int bounded_buffer_pop(bounded_buffer_t *buffer, log_item_t *item)
 {
     *item = buffer->items[buffer->head];
     buffer->head = (buffer->head + 1) % LOG_BUFFER_CAPACITY;
