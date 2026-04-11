@@ -520,7 +520,7 @@ static int cmd_run(int argc, char *argv[])
         mkdir("/proc", 0555);
         mount("proc", "/proc", "proc", 0, NULL);
 
-        execlp(cmd, cmd, NULL);
+        execl("/bin/sh", "sh", "-c", cmd, NULL);
 
         perror("exec failed");
         exit(1);
