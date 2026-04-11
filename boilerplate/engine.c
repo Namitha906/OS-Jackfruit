@@ -701,8 +701,10 @@ static int cmd_run(int argc, char *argv[])
 
     printf("Started container %s with PID %d\n", id, pid);
 
-    return 0;
+    return pid;
 }
+
+
 static int cmd_ps(void)
 {
     printf("ID\tPID\tSTATUS\n");
