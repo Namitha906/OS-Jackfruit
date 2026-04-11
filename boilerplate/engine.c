@@ -310,27 +310,14 @@ static void bounded_buffer_begin_shutdown(bounded_buffer_t *buffer)
  *   - wake consumers correctly
  *   - stop cleanly if shutdown begins
  */
-int bounded_buffer_push(bounded_buffer_t *buffer, const log_item_t *item)
+int bounded_buffer_push(...)
 {
-    pthread_mutex_lock(&buffer->mutex);
-
-    while (buffer->count == LOG_BUFFER_CAPACITY && !buffer->shutting_down)
-        pthread_cond_wait(&buffer->not_full, &buffer->mutex);
-
-    if (buffer->shutting_down) {
-        pthread_mutex_unlock(&buffer->mutex);
-        return -1;
-    }
-
     buffer->items[buffer->tail] = *item;
     buffer->tail = (buffer->tail + 1) % LOG_BUFFER_CAPACITY;
-    buffer->count++;
-
-    pthread_cond_signal(&buffer->not_empty);
-    pthread_mutex_unlock(&buffer->mutex);
-
     return 0;
 }
+
+
 
 /*
  * TODO:
@@ -341,25 +328,12 @@ int bounded_buffer_push(bounded_buffer_t *buffer, const log_item_t *item)
  *   - return a useful status when shutdown is in progress
  *   - avoid races with producers and shutdown
  */
-int bounded_buffer_pop(bounded_buffer_t *buffer, log_item_t *item)
+
+
+int bounded_buffer_pop(...)
 {
-    pthread_mutex_lock(&buffer->mutex);
-
-    while (buffer->count == 0 && !buffer->shutting_down)
-        pthread_cond_wait(&buffer->not_empty, &buffer->mutex);
-
-    if (buffer->count == 0 && buffer->shutting_down) {
-        pthread_mutex_unlock(&buffer->mutex);
-        return -1;
-    }
-
     *item = buffer->items[buffer->head];
     buffer->head = (buffer->head + 1) % LOG_BUFFER_CAPACITY;
-    buffer->count--;
-
-    pthread_cond_signal(&buffer->not_full);
-    pthread_mutex_unlock(&buffer->mutex);
-
     return 0;
 }
 
@@ -372,27 +346,34 @@ int bounded_buffer_pop(bounded_buffer_t *buffer, log_item_t *item)
  *   - route each chunk to the correct per-container log file
  *   - exit cleanly when shutdown begins and pending work is drained
  */
+
 void *logging_thread(void *arg)
 {
-    supervisor_ctx_t *ctx = arg;
+    supervisor_ctx_t *ctx = (supervisor_ctx_t *)arg;
+
     log_item_t item;
 
-    mkdir(LOG_DIR, 0777);
+    while (1) {
+        if (bounded_buffer_pop(&ctx->log_buffer, &item) != 0)
+            break;
 
-    while (bounded_buffer_pop(&ctx->log_buffer, &item) == 0) {
-
-        char path[256];
-        snprintf(path, sizeof(path), "%s/%s.log", LOG_DIR, item.container_id);
+        char path[PATH_MAX];
+        snprintf(path, sizeof(path), "logs/%s.log", item.container_id);
 
         int fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
-        if (fd >= 0) {
-            write(fd, item.data, item.length);
-            close(fd);
+        if (fd < 0) {
+            perror("open log file");
+            continue;
         }
+
+        write(fd, item.data, item.length);
+
+        close(fd);
     }
 
     return NULL;
 }
+
 
 /*
  * TODO:
@@ -686,16 +667,14 @@ static int cmd_start(int argc, char *argv[])
 
     return send_control_request(&req);
 }
-
 void *producer_thread(void *arg)
 {
-    producer_arg_t *parg = (producer_arg_t *)arg;
+    producer_arg_t *parg = arg;
 
     int fd = parg->pipe_fd;
-    log_item_t item;
 
-    strncpy(item.container_id, parg->container_id, CONTAINER_ID_LEN - 1);
-    item.container_id[CONTAINER_ID_LEN - 1] = '\0';
+    log_item_t item;
+    strncpy(item.container_id, parg->container_id, CONTAINER_ID_LEN);
 
     while (1) {
         ssize_t n = read(fd, item.data, LOG_CHUNK_SIZE);
@@ -705,7 +684,6 @@ void *producer_thread(void *arg)
 
         item.length = n;
 
-        // ✅ push into correct buffer
         bounded_buffer_push(&parg->ctx->log_buffer, &item);
     }
 
