@@ -143,6 +143,8 @@ typedef struct {
     container_record_t *containers;
 } supervisor_ctx_t;
 
+supervisor_ctx_t *GLOBAL_CTX = NULL;   
+
 typedef struct {
     int pipe_fd;
     char container_id[CONTAINER_ID_LEN];
