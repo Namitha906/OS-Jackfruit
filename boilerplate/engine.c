@@ -4,237 +4,277 @@
 #include <unistd.h>
 #include <string.h>
 #include <sys/wait.h>
-#include <signal.h>
-#include <sched.h>
 #include <sys/mount.h>
-#include <time.h>
 #include <pthread.h>
 #include <fcntl.h>
+#include <sys/stat.h>
+#include <limits.h>
 
-#define MAX_CONTAINERS 20
-#define FIFO_PATH "/tmp/cmd_pipe"
-#define BUFFER_SIZE 10
+#define CONTAINER_ID_LEN 32
+#define LOG_CHUNK_SIZE 4096
+#define LOG_BUFFER_CAPACITY 16
+#define MAX_CONTAINERS 10
+#define LOG_DIR "logs"
 
-/* ================= STRUCT ================= */
-struct container {
-    char id[32];
+/* ================= DATA STRUCTURES ================= */
+
+typedef struct {
+    char id[CONTAINER_ID_LEN];
     pid_t pid;
-    char state[16];
-};
+    int running;
+} container_t;
 
-struct container containers[MAX_CONTAINERS];
-int count = 0;
+container_t containers[MAX_CONTAINERS];
+int container_count = 0;
+
+typedef struct {
+    char container_id[CONTAINER_ID_LEN];
+    size_t length;
+    char data[LOG_CHUNK_SIZE];
+} log_item_t;
+
+typedef struct {
+    log_item_t items[LOG_BUFFER_CAPACITY];
+    int head, tail, count;
+    int shutdown;
+
+    pthread_mutex_t mutex;
+    pthread_cond_t not_full;
+    pthread_cond_t not_empty;
+} bounded_buffer_t;
+
+typedef struct {
+    bounded_buffer_t buffer;
+    pthread_t logger_thread;
+} supervisor_ctx_t;
+
+typedef struct {
+    int pipe_fd;
+    char container_id[CONTAINER_ID_LEN];
+    supervisor_ctx_t *ctx;
+} producer_arg_t;
 
 /* ================= BUFFER ================= */
-char buffer_log[BUFFER_SIZE][256];
-int in = 0, out = 0;
 
-pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
-pthread_cond_t not_full = PTHREAD_COND_INITIALIZER;
-pthread_cond_t not_empty = PTHREAD_COND_INITIALIZER;
+void buffer_init(bounded_buffer_t *b) {
+    b->head = b->tail = b->count = 0;
+    b->shutdown = 0;
+    pthread_mutex_init(&b->mutex, NULL);
+    pthread_cond_init(&b->not_full, NULL);
+    pthread_cond_init(&b->not_empty, NULL);
+}
+
+void buffer_push(bounded_buffer_t *b, log_item_t *item) {
+    pthread_mutex_lock(&b->mutex);
+
+    while (b->count == LOG_BUFFER_CAPACITY && !b->shutdown)
+        pthread_cond_wait(&b->not_full, &b->mutex);
+
+    if (b->shutdown) {
+        pthread_mutex_unlock(&b->mutex);
+        return;
+    }
+
+    b->items[b->tail] = *item;
+    b->tail = (b->tail + 1) % LOG_BUFFER_CAPACITY;
+    b->count++;
+
+    pthread_cond_signal(&b->not_empty);
+    pthread_mutex_unlock(&b->mutex);
+}
+
+int buffer_pop(bounded_buffer_t *b, log_item_t *item) {
+    pthread_mutex_lock(&b->mutex);
+
+    while (b->count == 0 && !b->shutdown)
+        pthread_cond_wait(&b->not_empty, &b->mutex);
+
+    if (b->count == 0 && b->shutdown) {
+        pthread_mutex_unlock(&b->mutex);
+        return 0;
+    }
+
+    *item = b->items[b->head];
+    b->head = (b->head + 1) % LOG_BUFFER_CAPACITY;
+    b->count--;
+
+    pthread_cond_signal(&b->not_full);
+    pthread_mutex_unlock(&b->mutex);
+    return 1;
+}
+
+void buffer_shutdown(bounded_buffer_t *b) {
+    pthread_mutex_lock(&b->mutex);
+    b->shutdown = 1;
+    pthread_cond_broadcast(&b->not_empty);
+    pthread_cond_broadcast(&b->not_full);
+    pthread_mutex_unlock(&b->mutex);
+}
+
+/* ================= LOGGER ================= */
+
+void *logger_thread(void *arg) {
+    supervisor_ctx_t *ctx = arg;
+    log_item_t item;
+
+    mkdir(LOG_DIR, 0777);
+
+    while (buffer_pop(&ctx->buffer, &item)) {
+
+        char path[PATH_MAX];
+        snprintf(path, sizeof(path), "%s/%s.log", LOG_DIR, item.container_id);
+
+        int fd = open(path, O_CREAT | O_WRONLY | O_APPEND, 0644);
+        if (fd < 0) continue;
+
+        write(fd, item.data, item.length);
+        close(fd);
+    }
+
+    return NULL;
+}
 
 /* ================= PRODUCER ================= */
-void *producer(void *arg)
-{
-    int fd = *(int *)arg;
-    char temp[256];
 
-    while (read(fd, temp, sizeof(temp)) > 0) {
+void *producer_thread(void *arg) {
+    producer_arg_t *p = arg;
 
-        pthread_mutex_lock(&lock);
-
-        while ((in + 1) % BUFFER_SIZE == out)
-            pthread_cond_wait(&not_full, &lock);
-
-        strcpy(buffer_log[in], temp);
-        in = (in + 1) % BUFFER_SIZE;
-
-        pthread_cond_signal(&not_empty);
-        pthread_mutex_unlock(&lock);
-    }
-
-    return NULL;
-}
-
-/* ================= CONSUMER ================= */
-void *consumer(void *arg)
-{
-    FILE *fp = fopen("container.log", "a");
+    log_item_t item;
+    strncpy(item.container_id, p->container_id, CONTAINER_ID_LEN);
 
     while (1) {
-        pthread_mutex_lock(&lock);
+        ssize_t n = read(p->pipe_fd, item.data, LOG_CHUNK_SIZE);
+        if (n <= 0) break;
 
-        while (in == out)
-            pthread_cond_wait(&not_empty, &lock);
-
-        fprintf(fp, "%s", buffer_log[out]);
-        fflush(fp);
-
-        out = (out + 1) % BUFFER_SIZE;
-
-        pthread_cond_signal(&not_full);
-        pthread_mutex_unlock(&lock);
+        item.length = n;
+        buffer_push(&p->ctx->buffer, &item);
     }
 
-    fclose(fp);
+    close(p->pipe_fd);
+    free(p);
     return NULL;
 }
 
-/* ================= FIND ================= */
-int find_container(char *id)
-{
-    for (int i = 0; i < count; i++) {
-        if (strcmp(containers[i].id, id) == 0)
-            return i;
-    }
-    return -1;
-}
+/* ================= RUN CONTAINER ================= */
 
-/* ================= SIGCHLD ================= */
-void handle_sigchld(int sig)
-{
-    int status;
-    pid_t pid;
-
-    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
-        for (int i = 0; i < count; i++) {
-            if (containers[i].pid == pid) {
-                strcpy(containers[i].state, "stopped");
-                printf("Container %s exited\n", containers[i].id);
-            }
-        }
-    }
-}
-
-/* ================= START ================= */
-void start_container(char *id, char *rootfs, char **args)
-{
+int run_container(supervisor_ctx_t *ctx, char *id, char *rootfs, char *cmd) {
     int pipefd[2];
-    pipe(pipefd);
+    if (pipe(pipefd) < 0) {
+        perror("pipe");
+        return -1;
+    }
 
     pid_t pid = fork();
 
     if (pid == 0) {
-        close(pipefd[0]);
+        /* CHILD */
 
         dup2(pipefd[1], STDOUT_FILENO);
         dup2(pipefd[1], STDERR_FILENO);
 
-        unshare(CLONE_NEWPID | CLONE_NEWUTS | CLONE_NEWNS);
+        close(pipefd[0]);
+        close(pipefd[1]);
 
-        if (chroot(rootfs) != 0) {
-            perror("chroot failed");
+        if (chroot(rootfs) < 0) {
+            perror("chroot");
             exit(1);
         }
 
         chdir("/");
         mount("proc", "/proc", "proc", 0, NULL);
 
-        execv(args[0], args);
+        execl(cmd, cmd, NULL);
 
-        perror("exec failed");
+        perror("exec");
         exit(1);
     }
-    else {
-        close(pipefd[1]);
 
-        pthread_t prod, cons;
-        pthread_create(&prod, NULL, producer, &pipefd[0]);
-        pthread_create(&cons, NULL, consumer, NULL);
+    /* PARENT */
+    close(pipefd[1]);
 
-        strcpy(containers[count].id, id);
-        containers[count].pid = pid;
-        strcpy(containers[count].state, "running");
-        count++;
+    producer_arg_t *p = malloc(sizeof(producer_arg_t));
+    p->pipe_fd = pipefd[0];
+    strncpy(p->container_id, id, CONTAINER_ID_LEN);
+    p->ctx = ctx;
 
-        printf("Started container %s (PID %d)\n", id, pid);
-    }
+    pthread_t t;
+    pthread_create(&t, NULL, producer_thread, p);
+
+    printf("Started container %s (PID %d)\n", id, pid);
+
+    containers[container_count].pid = pid;
+    strcpy(containers[container_count].id, id);
+    containers[container_count].running = 1;
+    container_count++;
+
+    return pid;
 }
 
-/* ================= STOP ================= */
-void stop_container(char *id)
-{
-    int idx = find_container(id);
+/* ================= SUPERVISOR ================= */
 
-    if (idx == -1) {
-        printf("Container not found\n");
-        return;
-    }
+void supervisor() {
+    supervisor_ctx_t ctx;
+    buffer_init(&ctx.buffer);
 
-    kill(containers[idx].pid, SIGTERM);
-    strcpy(containers[idx].state, "stopped");
+    pthread_create(&ctx.logger_thread, NULL, logger_thread, &ctx);
 
-    printf("Stopped %s\n", id);
-}
-
-/* ================= PS ================= */
-void list_containers()
-{
-    printf("\nID\tPID\tSTATE\n");
-
-    for (int i = 0; i < count; i++) {
-        printf("%s\t%d\t%s\n",
-               containers[i].id,
-               containers[i].pid,
-               containers[i].state);
-    }
-
-    printf("\n");
-}
-
-/* ================= MAIN ================= */
-int main()
-{
-    signal(SIGCHLD, handle_sigchld);
-
-    printf("Supervisor started...\n");
-
-    mkfifo(FIFO_PATH, 0666);
+    char input[256];
 
     while (1) {
+        printf("engine> ");
+        fflush(stdout);
 
-        FILE *fp = fopen(FIFO_PATH, "r");
-        if (!fp) continue;
+        if (!fgets(input, sizeof(input), stdin)) continue;
+        input[strcspn(input, "\n")] = 0;
 
-        char buffer[256];
+        if (strcmp(input, "exit") == 0) break;
 
-        if (fgets(buffer, sizeof(buffer), fp) != NULL) {
+        if (strncmp(input, "run", 3) == 0) {
+            char id[32], root[128], cmd[128];
 
-            char *token;
-            char cmd[32], id[32], rootfs[64];
-
-            token = strtok(buffer, " ");
-            if (!token) continue;
-            strcpy(cmd, token);
-
-            token = strtok(NULL, " ");
-            if (!token) continue;
-            strcpy(id, token);
-
-            token = strtok(NULL, " ");
-            if (!token) continue;
-            strcpy(rootfs, token);
-
-            char *args[10];
-            int i = 0;
-
-            while ((token = strtok(NULL, " \n")) != NULL) {
-                args[i++] = token;
+            if (sscanf(input, "run %s %s %s", id, root, cmd) != 3) {
+                printf("Invalid command\n");
+                continue;
             }
-            args[i] = NULL;
 
-            if (strcmp(cmd, "start") == 0) {
-                start_container(id, rootfs, args);
-            }
-            else if (strcmp(cmd, "ps") == 0) {
-                list_containers();
-            }
-            else if (strcmp(cmd, "stop") == 0) {
-                stop_container(id);
+            run_container(&ctx, id, root, cmd);
+        }
+
+        else if (strcmp(input, "ps") == 0) {
+            printf("ID\tPID\tSTATUS\n");
+            for (int i = 0; i < container_count; i++) {
+                printf("%s\t%d\t%s\n",
+                       containers[i].id,
+                       containers[i].pid,
+                       containers[i].running ? "running" : "stopped");
             }
         }
 
-        fclose(fp);
+        /* cleanup exited containers */
+        int status;
+        pid_t pid;
+        while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+            for (int i = 0; i < container_count; i++) {
+                if (containers[i].pid == pid)
+                    containers[i].running = 0;
+            }
+        }
+    }
+
+    buffer_shutdown(&ctx.buffer);
+    pthread_join(ctx.logger_thread, NULL);
+}
+
+/* ================= MAIN ================= */
+
+int main(int argc, char *argv[]) {
+    if (argc < 2) {
+        printf("Usage: ./engine supervisor\n");
+        return 1;
+    }
+
+    if (strcmp(argv[1], "supervisor") == 0) {
+        supervisor();
     }
 
     return 0;
