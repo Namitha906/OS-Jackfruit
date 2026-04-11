@@ -37,6 +37,8 @@
 
 #include "monitor_ioctl.h"
 
+static int cmd_run(int argc, char *argv[]);
+
 #define STACK_SIZE (1024 * 1024)
 #define CONTAINER_ID_LEN 32
 #define CONTROL_PATH "/tmp/mini_runtime.sock"
