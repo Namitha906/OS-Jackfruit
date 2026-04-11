@@ -497,8 +497,6 @@ int unregister_from_monitor(int monitor_fd, const char *container_id, pid_t host
     return 0;
 }
 
-
-
 static int cmd_run(int argc, char *argv[])
 {
     if (argc < 5) {
@@ -519,70 +517,47 @@ static int cmd_run(int argc, char *argv[])
         return 1;
     }
 
-   char *stack = malloc(STACK_SIZE);
-if (!stack) {
-    perror("malloc");
-    return 1;
-}
-
-child_config_t *config = malloc(sizeof(child_config_t));
-if (!config) {
-    perror("malloc");
-    return 1;
-}
-
-strncpy(config->id, id, CONTAINER_ID_LEN);
-strncpy(config->rootfs, rootfs, PATH_MAX);
-strncpy(config->command, cmd, CHILD_COMMAND_LEN);
-config->log_write_fd = pipefd[1];
-
-// clone instead of fork
-pid_t pid = clone(child_fn,
-                  stack + STACK_SIZE,
-                  CLONE_NEWPID | CLONE_NEWNS | CLONE_NEWUTS | SIGCHLD,
-                  config);
-
-if (pid < 0) {
-    perror("clone");
-    return 1;
-}
-
-// parent closes write end
-close(pipefd[1]);
-
-    if (pid < 0) {
-        perror("fork");
+    // allocate stack for clone
+    char *stack = malloc(STACK_SIZE);
+    if (!stack) {
+        perror("malloc");
         return 1;
     }
 
-   
-        if (chdir("/") < 0) {
-            perror("chdir");
-            exit(1);
-        }
-
-        mkdir("/proc", 0555);
-        mount("proc", "/proc", "proc", 0, NULL);
-
-        execl("/bin/sh", "sh", "-c", cmd, NULL);
-
-        perror("exec failed");
-        exit(1);
+    // setup config
+    child_config_t *config = malloc(sizeof(child_config_t));
+    if (!config) {
+        perror("malloc");
+        return 1;
     }
 
-    // ===== PARENT =====
+    strncpy(config->id, id, CONTAINER_ID_LEN);
+    strncpy(config->rootfs, rootfs, PATH_MAX);
+    strncpy(config->command, cmd, CHILD_COMMAND_LEN);
+    config->log_write_fd = pipefd[1];
 
-    close(pipefd[1]);  // close write end
+    // create container using clone
+    pid_t pid = clone(child_fn,
+                      stack + STACK_SIZE,
+                      CLONE_NEWPID | CLONE_NEWNS | CLONE_NEWUTS | SIGCHLD,
+                      config);
+
+    if (pid < 0) {
+        perror("clone");
+        return 1;
+    }
+
+    // parent closes write end
+    close(pipefd[1]);
 
     if (GLOBAL_CTX == NULL) {
-    fprintf(stderr, "GLOBAL_CTX not initialized\n");
-    return 1;
-}
+        fprintf(stderr, "GLOBAL_CTX not initialized\n");
+        return 1;
+    }
 
-
-    // create producer thread to read logs
+    // create producer thread
     pthread_t producer;
-    
+
     producer_arg_t *parg = malloc(sizeof(producer_arg_t));
     if (!parg) {
         perror("malloc");
