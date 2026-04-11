@@ -386,6 +386,8 @@ void *logging_thread(void *arg)
         if (bounded_buffer_pop(&ctx->log_buffer, &item) != 0)
             break;
 
+        printf("WRITING LOG for %s\n", item.container_id);
+         
         char path[PATH_MAX];
         snprintf(path, sizeof(path), "logs/%s.log", item.container_id);
 
@@ -557,6 +559,8 @@ static int cmd_run(int argc, char *argv[])
  */
 static int run_supervisor(const char *rootfs)
 {
+
+    mkdir("logs", 0755);
     (void)rootfs;
 
     printf("Supervisor running...\n");
