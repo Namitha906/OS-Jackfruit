@@ -548,34 +548,7 @@ static int cmd_run(int argc, char *argv[])
     }
 
     // parent closes write end
-    close(pipefd[1]);
-
-    if (GLOBAL_CTX == NULL) {
-        fprintf(stderr, "GLOBAL_CTX not initialized\n");
-        return 1;
-    }
-
-    // create producer thread
-    pthread_t producer;
-
-    producer_arg_t *parg = malloc(sizeof(producer_arg_t));
-    if (!parg) {
-        perror("malloc");
-        return 1;
-    }
-
-    parg->pipe_fd = pipefd[0];
-    strncpy(parg->container_id, id, CONTAINER_ID_LEN - 1);
-    parg->container_id[CONTAINER_ID_LEN - 1] = '\0';
-    parg->ctx = GLOBAL_CTX;
-
-    pthread_create(&producer, NULL, producer_thread, parg);
-
-    printf("Started container %s with PID %d\n", id, pid);
-
-    return pid;
-}
-
+   
 /*
  * TODO:
  * Implement the long-running supervisor process.
