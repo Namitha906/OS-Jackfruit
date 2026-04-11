@@ -371,8 +371,7 @@ int child_fn(void *arg)
         return 1;
     }
 
-    // Execute command
-    execl("/bin/sh", "sh", "-c", config->command, NULL);
+  execlp(config->command, config->command, NULL);
 
     perror("exec failed");
     return 1;
