@@ -40,7 +40,6 @@
 
 static int cmd_run(int argc, char *argv[]);
 void *producer_thread(void *arg);
-supervisor_ctx_t *GLOBAL_CTX = NULL;
 
 #define STACK_SIZE (1024 * 1024)
 #define CONTAINER_ID_LEN 32
@@ -518,10 +517,12 @@ static int cmd_run(int argc, char *argv[])
     } producer_arg_t;
 
     producer_arg_t *parg = malloc(sizeof(producer_arg_t));
-    parg->fd = pipefd[0];
-    strncpy(parg->id, id, CONTAINER_ID_LEN);
-    parg->ctx = GLOBAL_CTX; 
+    parg->pipe_fd = pipefd[0];
+    strncpy(parg->container_id, id, CONTAINER_ID_LEN - 1);
+    parg->container_id[CONTAINER_ID_LEN - 1] = '\0';
+    parg->ctx = GLOBAL_CTX;   // ✅ CRITICAL
 
+  
     pthread_create(&producer, NULL, producer_thread, parg);
 
     printf("Started container %s with PID %d\n", id, pid);
@@ -684,17 +685,13 @@ static int cmd_start(int argc, char *argv[])
 
 void *producer_thread(void *arg)
 {
-    typedef struct {
-        int fd;
-        char id[CONTAINER_ID_LEN];
-    } producer_arg_t;
+    producer_arg_t *parg = (producer_arg_t *)arg;
 
-    producer_arg_t *parg = arg;
-
-    int fd = parg->fd;
+    int fd = parg->pipe_fd;
     log_item_t item;
 
-    strncpy(item.container_id, parg->id, CONTAINER_ID_LEN);
+    strncpy(item.container_id, parg->container_id, CONTAINER_ID_LEN - 1);
+    item.container_id[CONTAINER_ID_LEN - 1] = '\0';
 
     while (1) {
         ssize_t n = read(fd, item.data, LOG_CHUNK_SIZE);
@@ -704,6 +701,7 @@ void *producer_thread(void *arg)
 
         item.length = n;
 
+        // ✅ push into correct buffer
         bounded_buffer_push(&parg->ctx->log_buffer, &item);
     }
 
@@ -712,6 +710,9 @@ void *producer_thread(void *arg)
 
     return NULL;
 }
+
+
+      
 
 
 
