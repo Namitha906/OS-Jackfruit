@@ -348,7 +348,33 @@ void *logging_thread(void *arg)
  */
 int child_fn(void *arg)
 {
-    (void)arg;
+    child_config_t *config = (child_config_t *)arg;
+
+    // Set hostname (UTS namespace)
+    sethostname(config->id, strlen(config->id));
+
+    // Change root
+    if (chroot(config->rootfs) < 0) {
+        perror("chroot");
+        return 1;
+    }
+
+    if (chdir("/") < 0) {
+        perror("chdir");
+        return 1;
+    }
+
+    // Mount proc
+    mkdir("/proc", 0555);
+    if (mount("proc", "/proc", "proc", 0, NULL) < 0) {
+        perror("mount");
+        return 1;
+    }
+
+    // Execute command
+    execl("/bin/sh", "sh", "-c", config->command, NULL);
+
+    perror("exec failed");
     return 1;
 }
 
@@ -532,7 +558,7 @@ static int cmd_start(int argc, char *argv[])
 
 static int cmd_run(int argc, char *argv[])
 {
-   if (argc < 5) {
+    if (argc < 5) {
         fprintf(stderr,
                 "Usage: %s run <id> <rootfs> <command>\n",
                 argv[0]);
@@ -543,39 +569,39 @@ static int cmd_run(int argc, char *argv[])
     char *rootfs = argv[3];
     char *cmd = argv[4];
 
-    pid_t pid = fork();
-
-    if (pid < 0) {
-        perror("fork");
+    // allocate stack for clone
+    char *stack = malloc(STACK_SIZE);
+    if (!stack) {
+        perror("malloc");
         return 1;
     }
 
-    if (pid == 0) {
-        // CHILD → container
-
-        if (chroot(rootfs) < 0) {
-            perror("chroot");
-            exit(1);
-        }
-
-        if (chdir("/") < 0) {
-            perror("chdir");
-            exit(1);
-        }
-
-        mkdir("/proc", 0555);
-        mount("proc", "/proc", "proc", 0, NULL);
-
-        execlp(cmd, cmd, NULL);
-        perror("exec");
-        exit(1);
+    // config
+    child_config_t *config = malloc(sizeof(child_config_t));
+    if (!config) {
+        perror("malloc");
+        return 1;
     }
 
-    // PARENT
+    strncpy(config->id, id, CONTAINER_ID_LEN);
+    strncpy(config->rootfs, rootfs, PATH_MAX);
+    strncpy(config->command, cmd, CHILD_COMMAND_LEN);
+
+    // create container
+    pid_t pid = clone(child_fn,
+                      stack + STACK_SIZE,
+                      CLONE_NEWPID | CLONE_NEWNS | CLONE_NEWUTS | SIGCHLD,
+                      config);
+
+    if (pid < 0) {
+        perror("clone");
+        return 1;
+    }
+
     printf("Started container %s with PID %d\n", id, pid);
+
     return 0;
 }
-
 static int cmd_ps(void)
 {
     printf("ID\tPID\tSTATUS\n");
