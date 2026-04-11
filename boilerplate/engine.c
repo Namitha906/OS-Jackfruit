@@ -711,6 +711,8 @@ void *producer_thread(void *arg)
         if (n <= 0)
             break;
 
+         printf("READ %ld bytes from container\n", n);
+
         item.length = n;
 
         bounded_buffer_push(&parg->ctx->log_buffer, &item);
