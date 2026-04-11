@@ -299,9 +299,24 @@ static void bounded_buffer_begin_shutdown(bounded_buffer_t *buffer)
  */
 int bounded_buffer_push(bounded_buffer_t *buffer, const log_item_t *item)
 {
-    (void)buffer;
-    (void)item;
-    return -1;
+    pthread_mutex_lock(&buffer->mutex);
+
+    while (buffer->count == LOG_BUFFER_CAPACITY && !buffer->shutting_down)
+        pthread_cond_wait(&buffer->not_full, &buffer->mutex);
+
+    if (buffer->shutting_down) {
+        pthread_mutex_unlock(&buffer->mutex);
+        return -1;
+    }
+
+    buffer->items[buffer->tail] = *item;
+    buffer->tail = (buffer->tail + 1) % LOG_BUFFER_CAPACITY;
+    buffer->count++;
+
+    pthread_cond_signal(&buffer->not_empty);
+    pthread_mutex_unlock(&buffer->mutex);
+
+    return 0;
 }
 
 /*
@@ -315,9 +330,24 @@ int bounded_buffer_push(bounded_buffer_t *buffer, const log_item_t *item)
  */
 int bounded_buffer_pop(bounded_buffer_t *buffer, log_item_t *item)
 {
-    (void)buffer;
-    (void)item;
-    return -1;
+    pthread_mutex_lock(&buffer->mutex);
+
+    while (buffer->count == 0 && !buffer->shutting_down)
+        pthread_cond_wait(&buffer->not_empty, &buffer->mutex);
+
+    if (buffer->count == 0 && buffer->shutting_down) {
+        pthread_mutex_unlock(&buffer->mutex);
+        return -1;
+    }
+
+    *item = buffer->items[buffer->head];
+    buffer->head = (buffer->head + 1) % LOG_BUFFER_CAPACITY;
+    buffer->count--;
+
+    pthread_cond_signal(&buffer->not_full);
+    pthread_mutex_unlock(&buffer->mutex);
+
+    return 0;
 }
 
 /*
@@ -331,7 +361,23 @@ int bounded_buffer_pop(bounded_buffer_t *buffer, log_item_t *item)
  */
 void *logging_thread(void *arg)
 {
-    (void)arg;
+    supervisor_ctx_t *ctx = arg;
+    log_item_t item;
+
+    mkdir(LOG_DIR, 0777);
+
+    while (bounded_buffer_pop(&ctx->log_buffer, &item) == 0) {
+
+        char path[256];
+        snprintf(path, sizeof(path), "%s/%s.log", LOG_DIR, item.container_id);
+
+        int fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
+        if (fd >= 0) {
+            write(fd, item.data, item.length);
+            close(fd);
+        }
+    }
+
     return NULL;
 }
 
@@ -399,9 +445,21 @@ int unregister_from_monitor(int monitor_fd, const char *container_id, pid_t host
  */
 static int run_supervisor(const char *rootfs)
 {
-    (void)rootfs; // remove warning
+    (void)rootfs;
 
     printf("Supervisor running...\n");
+
+    supervisor_ctx_t ctx;
+    memset(&ctx, 0, sizeof(ctx));   // ✅ important
+
+    // initialize buffer
+    if (bounded_buffer_init(&ctx.log_buffer) != 0) {
+        perror("bounded_buffer_init");
+        return 1;
+    }
+
+    // start logging thread
+    pthread_create(&ctx.logger_thread, NULL, logging_thread, &ctx);
 
     char input[256];
 
@@ -421,7 +479,7 @@ static int run_supervisor(const char *rootfs)
         }
 
         // RUN command
-        if (strncmp(input, "run", 3) == 0) {
+        else if (strncmp(input, "run", 3) == 0) {
             char id[32], root[128], cmd[128];
 
             if (sscanf(input, "run %s %s %s", id, root, cmd) != 3) {
@@ -429,21 +487,15 @@ static int run_supervisor(const char *rootfs)
                 continue;
             }
 
-            pid_t pid = fork();
+            char *args[] = {"./engine", "run", id, root, cmd, NULL};
 
-            if (pid == 0) {
-                execl("./engine", "./engine", "run", id, root, cmd, NULL);
-                perror("exec");
-                exit(1);
-            } else if (pid > 0) {
-                printf("Started container %s with PID %d\n", id, pid);
+            pid_t pid = cmd_run(5, args);   // ✅ FIXED
 
+            if (pid > 0) {
                 strcpy(containers[container_count].id, id);
                 containers[container_count].pid = pid;
                 containers[container_count].running = 1;
                 container_count++;
-            } else {
-                perror("fork");
             }
         }
 
@@ -458,7 +510,7 @@ static int run_supervisor(const char *rootfs)
             }
         }
 
-        // 👇 CLEAN wait loop (NO SPAM)
+        // CLEAN wait loop (NO SPAM)
         int status;
         pid_t pid;
 
@@ -473,9 +525,12 @@ static int run_supervisor(const char *rootfs)
         }
     }
 
+    // shutdown logging system
+    bounded_buffer_begin_shutdown(&ctx.log_buffer);
+    pthread_join(ctx.logger_thread, NULL);
+
     return 0;
 }
-    
 
   
     /*
@@ -530,9 +585,41 @@ static int cmd_start(int argc, char *argv[])
     return send_control_request(&req);
 }
 
+void *producer_thread(void *arg)
+{
+    typedef struct {
+        int fd;
+        char id[CONTAINER_ID_LEN];
+    } producer_arg_t;
+
+    producer_arg_t *parg = arg;
+
+    int fd = parg->fd;
+    log_item_t item;
+
+    strncpy(item.container_id, parg->id, CONTAINER_ID_LEN);
+
+    while (1) {
+        ssize_t n = read(fd, item.data, LOG_CHUNK_SIZE);
+
+        if (n <= 0)
+            break;
+
+        item.length = n;
+
+        bounded_buffer_push(&((supervisor_ctx_t *)NULL)->log_buffer, &item);
+    }
+
+    close(fd);
+    free(parg);
+
+    return NULL;
+}
+
+
 static int cmd_run(int argc, char *argv[])
 {
-   if (argc < 5) {
+    if (argc < 5) {
         fprintf(stderr,
                 "Usage: %s run <id> <rootfs> <command>\n",
                 argv[0]);
@@ -543,6 +630,13 @@ static int cmd_run(int argc, char *argv[])
     char *rootfs = argv[3];
     char *cmd = argv[4];
 
+    int pipefd[2];
+
+    if (pipe(pipefd) < 0) {
+        perror("pipe");
+        return 1;
+    }
+
     pid_t pid = fork();
 
     if (pid < 0) {
@@ -551,7 +645,14 @@ static int cmd_run(int argc, char *argv[])
     }
 
     if (pid == 0) {
-        // CHILD → container
+        // ===== CHILD → container =====
+
+        // redirect stdout + stderr to pipe
+        dup2(pipefd[1], STDOUT_FILENO);
+        dup2(pipefd[1], STDERR_FILENO);
+
+        close(pipefd[0]);
+        close(pipefd[1]);
 
         if (chroot(rootfs) < 0) {
             perror("chroot");
@@ -567,14 +668,34 @@ static int cmd_run(int argc, char *argv[])
         mount("proc", "/proc", "proc", 0, NULL);
 
         execlp(cmd, cmd, NULL);
-        perror("exec");
+
+        perror("exec failed");
         exit(1);
     }
 
-    // PARENT
+    // ===== PARENT =====
+
+    close(pipefd[1]);  // close write end
+
+    // create producer thread to read logs
+    pthread_t producer;
+    
+    typedef struct {
+        int fd;
+        char id[CONTAINER_ID_LEN];
+    } producer_arg_t;
+
+    producer_arg_t *parg = malloc(sizeof(producer_arg_t));
+    parg->fd = pipefd[0];
+    strncpy(parg->id, id, CONTAINER_ID_LEN);
+
+    pthread_create(&producer, NULL, producer_thread, parg);
+
     printf("Started container %s with PID %d\n", id, pid);
-    return 0;
+
+    return pid;
 }
+
 
 static int cmd_ps(void)
 {
