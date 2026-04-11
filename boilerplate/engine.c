@@ -138,6 +138,19 @@ typedef struct {
     container_record_t *containers;
 } supervisor_ctx_t;
 
+void handle_sigchld(int sig)
+{
+    (void)sig;
+    while (waitpid(-1, NULL, WNOHANG) > 0);
+}
+
+void handle_shutdown(int sig)
+{
+    printf("Supervisor shutting down...\n");
+    unlink(CONTROL_PATH);   // clean socket
+    exit(0);
+}
+
 static void usage(const char *prog)
 {
     fprintf(stderr,
@@ -422,86 +435,143 @@ int unregister_from_monitor(int monitor_fd, const char *container_id, pid_t host
  *   - accept control requests and update container state
  *   - reap children and respond to signals
  */
+
 static int run_supervisor(const char *rootfs)
 {
-    (void)rootfs; // remove warning
+    (void)rootfs;
 
     printf("Supervisor running...\n");
 
-    char input[256];
+     signal(SIGCHLD, handle_sigchld);
+     signal(SIGINT, handle_shutdown);
+     signal(SIGTERM, handle_shutdown);
 
+
+    // ===== SOCKET SETUP =====
+    int server_fd;
+    struct sockaddr_un addr;
+
+    server_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (server_fd < 0) {
+        perror("socket");
+        exit(1);
+    }
+
+    unlink(CONTROL_PATH);
+
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, CONTROL_PATH, sizeof(addr.sun_path) - 1);
+
+    if (bind(server_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        perror("bind");
+        exit(1);
+    }
+
+    if (listen(server_fd, 5) < 0) {
+        perror("listen");
+        exit(1);
+    }
+
+    printf("Supervisor listening on %s\n", CONTROL_PATH);
+
+    // ===== MAIN LOOP =====
     while (1) {
-        printf("engine> ");
-        fflush(stdout);
 
-        if (fgets(input, sizeof(input), stdin) == NULL)
+        int client_fd = accept(server_fd, NULL, NULL);
+        if (client_fd < 0) {
+            perror("accept");
             continue;
-
-        input[strcspn(input, "\n")] = 0;
-
-        // EXIT
-        if (strcmp(input, "exit") == 0) {
-            printf("Exiting supervisor...\n");
-            break;
         }
 
-        // RUN command
-        if (strncmp(input, "run", 3) == 0) {
-            char id[32], root[128], cmd[128];
+        control_request_t req;
+        memset(&req, 0, sizeof(req));
 
-            if (sscanf(input, "run %s %s %s", id, root, cmd) != 3) {
-                printf("Invalid command\n");
-                continue;
-            }
+        if (read(client_fd, &req, sizeof(req)) <= 0) {
+            close(client_fd);
+            continue;
+        }
 
-            pid_t pid = fork();
+        control_response_t res;
+        memset(&res, 0, sizeof(res));
 
-            if (pid == 0) {
-                execl("./engine", "./engine", "run", id, root, cmd, NULL);
-                perror("exec");
-                exit(1);
-            } else if (pid > 0) {
-                printf("Started container %s with PID %d\n", id, pid);
+        // ===== HANDLE COMMANDS =====
 
-                strcpy(containers[container_count].id, id);
+        // START
+        if (req.kind == CMD_START) {
+
+            char *args[] = {
+                "./engine",
+                "run",
+                req.container_id,
+                req.rootfs,
+                req.command,
+                NULL
+            };
+
+            pid_t pid = cmd_run(5, args);
+
+            if (pid > 0) {
+                strcpy(containers[container_count].id, req.container_id);
                 containers[container_count].pid = pid;
                 containers[container_count].running = 1;
                 container_count++;
+
+                snprintf(res.message, sizeof(res.message),
+                         "Started container %s (PID %d)",
+                         req.container_id, pid);
             } else {
-                perror("fork");
+                strcpy(res.message, "Failed to start container");
             }
         }
 
-        // PS command
-        else if (strcmp(input, "ps") == 0) {
-            printf("ID\tPID\tSTATUS\n");
+        // PS
+        else if (req.kind == CMD_PS) {
+
+            char buffer[512] = "ID\tPID\tSTATUS\n";
+
             for (int i = 0; i < container_count; i++) {
-                printf("%s\t%d\t%s\n",
-                       containers[i].id,
-                       containers[i].pid,
-                       containers[i].running ? "running" : "stopped");
+                char line[128];
+                snprintf(line, sizeof(line), "%s\t%d\t%s\n",
+                         containers[i].id,
+                         containers[i].pid,
+                         containers[i].running ? "running" : "stopped");
+                strcat(buffer, line);
             }
+
+            strncpy(res.message, buffer, sizeof(res.message) - 1);
         }
 
-        // 👇 CLEAN wait loop (NO SPAM)
-        int status;
-        pid_t pid;
+        // STOP
+        else if (req.kind == CMD_STOP) {
 
-        while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
-            printf("Container with PID %d exited\n", pid);
+            int found = 0;
 
             for (int i = 0; i < container_count; i++) {
-                if (containers[i].pid == pid) {
+                if (strcmp(containers[i].id, req.container_id) == 0) {
+                    kill(containers[i].pid, SIGTERM);
                     containers[i].running = 0;
+                    found = 1;
                 }
             }
+
+            if (found)
+                strcpy(res.message, "Container stopped");
+            else
+                strcpy(res.message, "Container not found");
         }
+
+        else {
+            strcpy(res.message, "Unknown command");
+        }
+
+        // ===== SEND RESPONSE =====
+        write(client_fd, &res, sizeof(res));
+        close(client_fd);
     }
 
     return 0;
 }
-    
-
   
     /*
      * TODO:
@@ -525,35 +595,35 @@ static int run_supervisor(const char *rootfs)
  */
 static int send_control_request(const control_request_t *req)
 {
-    (void)req;
-    fprintf(stderr, "Control-plane client path not implemented.\n");
-    return 1;
-}
+    int fd;
+    struct sockaddr_un addr;
 
-static int cmd_start(int argc, char *argv[])
-{
-    control_request_t req;
-
-    if (argc < 5) {
-        fprintf(stderr,
-                "Usage: %s start <id> <container-rootfs> <command> [--soft-mib N] [--hard-mib N] [--nice N]\n",
-                argv[0]);
+    fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd < 0) {
+        perror("socket");
         return 1;
     }
 
-    memset(&req, 0, sizeof(req));
-    req.kind = CMD_START;
-    strncpy(req.container_id, argv[2], sizeof(req.container_id) - 1);
-    strncpy(req.rootfs, argv[3], sizeof(req.rootfs) - 1);
-    strncpy(req.command, argv[4], sizeof(req.command) - 1);
-    req.soft_limit_bytes = DEFAULT_SOFT_LIMIT;
-    req.hard_limit_bytes = DEFAULT_HARD_LIMIT;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, CONTROL_PATH, sizeof(addr.sun_path) - 1);
 
-    if (parse_optional_flags(&req, argc, argv, 5) != 0)
+    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        perror("connect");
         return 1;
+    }
 
-    return send_control_request(&req);
+    write(fd, req, sizeof(*req));
+
+    control_response_t res;
+    read(fd, &res, sizeof(res));
+
+    printf("%s\n", res.message);
+
+    close(fd);
+    return 0;
 }
+
 
 static int cmd_run(int argc, char *argv[])
 {
