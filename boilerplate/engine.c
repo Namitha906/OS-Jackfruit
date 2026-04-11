@@ -507,22 +507,26 @@ static int cmd_run(int argc, char *argv[])
 
     close(pipefd[1]);  // close write end
 
+    if (GLOBAL_CTX == NULL) {
+    fprintf(stderr, "GLOBAL_CTX not initialized\n");
+    return 1;
+}
+
+
     // create producer thread to read logs
     pthread_t producer;
     
-    typedef struct {
-        int fd;
-        char id[CONTAINER_ID_LEN];
-        supervisor_ctx_t *ctx; 
-    } producer_arg_t;
-
     producer_arg_t *parg = malloc(sizeof(producer_arg_t));
+    if (!parg) {
+        perror("malloc");
+        return 1;
+    }
+
     parg->pipe_fd = pipefd[0];
     strncpy(parg->container_id, id, CONTAINER_ID_LEN - 1);
     parg->container_id[CONTAINER_ID_LEN - 1] = '\0';
-    parg->ctx = GLOBAL_CTX;   // ✅ CRITICAL
+    parg->ctx = GLOBAL_CTX;
 
-  
     pthread_create(&producer, NULL, producer_thread, parg);
 
     printf("Started container %s with PID %d\n", id, pid);
