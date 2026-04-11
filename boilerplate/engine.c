@@ -432,6 +432,87 @@ int unregister_from_monitor(int monitor_fd, const char *container_id, pid_t host
     return 0;
 }
 
+
+
+static int cmd_run(int argc, char *argv[])
+{
+    if (argc < 5) {
+        fprintf(stderr,
+                "Usage: %s run <id> <rootfs> <command>\n",
+                argv[0]);
+        return 1;
+    }
+
+    char *id = argv[2];
+    char *rootfs = argv[3];
+    char *cmd = argv[4];
+
+    int pipefd[2];
+
+    if (pipe(pipefd) < 0) {
+        perror("pipe");
+        return 1;
+    }
+
+    pid_t pid = fork();
+
+    if (pid < 0) {
+        perror("fork");
+        return 1;
+    }
+
+    if (pid == 0) {
+        // ===== CHILD → container =====
+
+        // redirect stdout + stderr to pipe
+        dup2(pipefd[1], STDOUT_FILENO);
+        dup2(pipefd[1], STDERR_FILENO);
+
+        close(pipefd[0]);
+        close(pipefd[1]);
+
+        if (chroot(rootfs) < 0) {
+            perror("chroot");
+            exit(1);
+        }
+
+        if (chdir("/") < 0) {
+            perror("chdir");
+            exit(1);
+        }
+
+        mkdir("/proc", 0555);
+        mount("proc", "/proc", "proc", 0, NULL);
+
+        execlp(cmd, cmd, NULL);
+
+        perror("exec failed");
+        exit(1);
+    }
+
+    // ===== PARENT =====
+
+    close(pipefd[1]);  // close write end
+
+    // create producer thread to read logs
+    pthread_t producer;
+    
+    typedef struct {
+        int fd;
+        char id[CONTAINER_ID_LEN];
+    } producer_arg_t;
+
+    producer_arg_t *parg = malloc(sizeof(producer_arg_t));
+    parg->fd = pipefd[0];
+    strncpy(parg->id, id, CONTAINER_ID_LEN);
+
+    pthread_create(&producer, NULL, producer_thread, parg);
+
+    printf("Started container %s with PID %d\n", id, pid);
+
+    return pid;
+}
+
 /*
  * TODO:
  * Implement the long-running supervisor process.
@@ -617,84 +698,6 @@ void *producer_thread(void *arg)
 }
 
 
-static int cmd_run(int argc, char *argv[])
-{
-    if (argc < 5) {
-        fprintf(stderr,
-                "Usage: %s run <id> <rootfs> <command>\n",
-                argv[0]);
-        return 1;
-    }
-
-    char *id = argv[2];
-    char *rootfs = argv[3];
-    char *cmd = argv[4];
-
-    int pipefd[2];
-
-    if (pipe(pipefd) < 0) {
-        perror("pipe");
-        return 1;
-    }
-
-    pid_t pid = fork();
-
-    if (pid < 0) {
-        perror("fork");
-        return 1;
-    }
-
-    if (pid == 0) {
-        // ===== CHILD → container =====
-
-        // redirect stdout + stderr to pipe
-        dup2(pipefd[1], STDOUT_FILENO);
-        dup2(pipefd[1], STDERR_FILENO);
-
-        close(pipefd[0]);
-        close(pipefd[1]);
-
-        if (chroot(rootfs) < 0) {
-            perror("chroot");
-            exit(1);
-        }
-
-        if (chdir("/") < 0) {
-            perror("chdir");
-            exit(1);
-        }
-
-        mkdir("/proc", 0555);
-        mount("proc", "/proc", "proc", 0, NULL);
-
-        execlp(cmd, cmd, NULL);
-
-        perror("exec failed");
-        exit(1);
-    }
-
-    // ===== PARENT =====
-
-    close(pipefd[1]);  // close write end
-
-    // create producer thread to read logs
-    pthread_t producer;
-    
-    typedef struct {
-        int fd;
-        char id[CONTAINER_ID_LEN];
-    } producer_arg_t;
-
-    producer_arg_t *parg = malloc(sizeof(producer_arg_t));
-    parg->fd = pipefd[0];
-    strncpy(parg->id, id, CONTAINER_ID_LEN);
-
-    pthread_create(&producer, NULL, producer_thread, parg);
-
-    printf("Started container %s with PID %d\n", id, pid);
-
-    return pid;
-}
 
 
 static int cmd_ps(void)
