@@ -40,6 +40,7 @@
 
 static int cmd_run(int argc, char *argv[]);
 void *producer_thread(void *arg);
+supervisor_ctx_t *GLOBAL_CTX = NULL;
 
 #define STACK_SIZE (1024 * 1024)
 #define CONTAINER_ID_LEN 32
@@ -141,6 +142,13 @@ typedef struct {
     pthread_mutex_t metadata_lock;
     container_record_t *containers;
 } supervisor_ctx_t;
+
+typedef struct {
+    int pipe_fd;
+    char container_id[CONTAINER_ID_LEN];
+    supervisor_ctx_t *ctx;   // ✅ ADD THIS
+} producer_arg_t;
+
 
 static void usage(const char *prog)
 {
@@ -504,11 +512,13 @@ static int cmd_run(int argc, char *argv[])
     typedef struct {
         int fd;
         char id[CONTAINER_ID_LEN];
+        supervisor_ctx_t *ctx; 
     } producer_arg_t;
 
     producer_arg_t *parg = malloc(sizeof(producer_arg_t));
     parg->fd = pipefd[0];
     strncpy(parg->id, id, CONTAINER_ID_LEN);
+    parg->ctx = GLOBAL_CTX; 
 
     pthread_create(&producer, NULL, producer_thread, parg);
 
@@ -535,7 +545,7 @@ static int run_supervisor(const char *rootfs)
     printf("Supervisor running...\n");
 
     supervisor_ctx_t ctx;
-    memset(&ctx, 0, sizeof(ctx));   // ✅ important
+    GLOBAL_CTX = &ctx;
 
     // initialize buffer
     if (bounded_buffer_init(&ctx.log_buffer) != 0) {
@@ -692,7 +702,7 @@ void *producer_thread(void *arg)
 
         item.length = n;
 
-        bounded_buffer_push(&((supervisor_ctx_t *)NULL)->log_buffer, &item);
+        bounded_buffer_push(&parg->ctx->log_buffer, &item);
     }
 
     close(fd);
