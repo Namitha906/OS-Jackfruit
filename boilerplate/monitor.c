@@ -74,7 +74,7 @@ static struct class     *cl;
  * Returns the Resident Set Size in bytes for the given PID,
  * or -1 if the task no longer exists.
  * --------------------------------------------------------------- */
-static long get_rss_bytes(pid_t pid)
+static long __attribute__((used)) get_rss_bytes(pid_t pid)
 {
     struct task_struct *task;
     struct mm_struct   *mm;
@@ -102,7 +102,7 @@ static long get_rss_bytes(pid_t pid)
 /* ---------------------------------------------------------------
  * Provided: soft-limit helper
  * --------------------------------------------------------------- */
-static void log_soft_limit_event(const char *container_id,
+static void __attribute__((used)) log_soft_limit_event(const char *container_id,
                                  pid_t pid,
                                  unsigned long limit_bytes,
                                  long rss_bytes)
@@ -115,7 +115,7 @@ static void log_soft_limit_event(const char *container_id,
 /* ---------------------------------------------------------------
  * Provided: hard-limit helper
  * --------------------------------------------------------------- */
-static void kill_process(const char *container_id,
+static void __attribute__((used)) kill_process(const char *container_id,
                          pid_t pid,
                          unsigned long limit_bytes,
                          long rss_bytes)
