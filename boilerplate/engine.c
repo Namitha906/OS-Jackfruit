@@ -414,11 +414,14 @@ void *logging_thread(void *arg)
     return NULL;
 }
 
-
 void *producer_thread(void *arg)
 {
-    int fd = *(int *)arg;
-    free(arg);
+    producer_arg_t *p = (producer_arg_t *)arg;
+    int fd = p->fd;
+    char container_id[CONTAINER_ID_LEN];
+    strncpy(container_id, p->container_id, CONTAINER_ID_LEN);
+
+    free(p);
 
     char buf[LOG_CHUNK_SIZE];
 
@@ -427,15 +430,18 @@ void *producer_thread(void *arg)
         if (n <= 0) break;
 
         log_item_t item;
-        strncpy(item.container_id, "default", CONTAINER_ID_LEN);
+        strncpy(item.container_id, container_id, CONTAINER_ID_LEN);
         item.length = n;
         memcpy(item.data, buf, n);
+
         bounded_buffer_push(&GLOBAL_CTX->log_buffer, &item);
     }
 
     close(fd);
     return NULL;
 }
+
+
 /*
  * TODO:
  * Implement the clone child entrypoint.
@@ -825,16 +831,16 @@ if (monitor_fd >= 0) {
     close(pipefd[1]);  // parent does not write
 
     // ===== START PRODUCER THREAD =====
-    pthread_t producer;
-    int *fd = malloc(sizeof(int));
-    if (!fd) {
-        perror("malloc");
-        return 1;
-    }
+   typedef struct {
+    int fd;
+    char container_id[CONTAINER_ID_LEN];
+} producer_arg_t;
 
-    *fd = pipefd[0];
-    pthread_create(&producer, NULL, producer_thread, fd);
+   producer_arg_t *p = malloc(sizeof(producer_arg_t));
+   p->fd = pipefd[0];
+   strncpy(p->container_id, id, CONTAINER_ID_LEN);
 
+    pthread_create(&producer, NULL, producer_thread, p);
     printf("Started container %s with PID %d\n", id, pid);
 
     // ===== CLEANUP (parent-side memory) =====
