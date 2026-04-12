@@ -248,8 +248,7 @@ static void __exit monitor_exit(void)
     struct container_node *node, *tmp;
 
    if (timer_pending(&monitor_timer))
-      del_timer(&monitor_timer);
-
+     timer_delete_sync(&monitor_timer);
     mutex_lock(&container_lock);
 
     list_for_each_entry_safe(node, tmp, &container_list, list) {
