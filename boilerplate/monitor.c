@@ -12,6 +12,9 @@
 #include <linux/fs.h>
 #include <linux/uaccess.h>
 #include <linux/signal.h>
+#include <linux/device.h>
+#include <linux/cdev.h>
+#include <linux/version.h>
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("Container Memory Monitor");
@@ -244,7 +247,7 @@ static void __exit monitor_exit(void)
     struct container_node *node, *tmp;
 
    if (timer_pending(&monitor_timer))
-    del_timer(&monitor_timer);
+      del_timer(&monitor_timer);
 
     mutex_lock(&container_lock);
 
