@@ -37,7 +37,7 @@
 
 #include "monitor_ioctl.h"
 
-supervisor_ctx_t *GLOBAL_CTX = NULL;
+
 
 static int cmd_run(int argc, char *argv[]);
 static int cmd_start(int argc, char *argv[]);
@@ -143,6 +143,8 @@ typedef struct {
     container_record_t *containers;
 } supervisor_ctx_t;
 
+supervisor_ctx_t *GLOBAL_CTX = NULL;
+
 
 void handle_sigchld(int sig)
 {
@@ -151,7 +153,8 @@ void handle_sigchld(int sig)
 }
 
  
-
+static void bounded_buffer_begin_shutdown(bounded_buffer_t *buffer);
+static void bounded_buffer_destroy(bounded_buffer_t *buffer);
 void handle_shutdown(int sig)
 {
     (void)sig;
