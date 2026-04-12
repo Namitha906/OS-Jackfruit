@@ -37,6 +37,8 @@
 
 #include "monitor_ioctl.h"
 
+supervisor_ctx_t *GLOBAL_CTX = NULL;
+
 static int cmd_run(int argc, char *argv[]);
 static int cmd_start(int argc, char *argv[]);
 
@@ -141,16 +143,28 @@ typedef struct {
     container_record_t *containers;
 } supervisor_ctx_t;
 
+
 void handle_sigchld(int sig)
 {
     (void)sig;
     while (waitpid(-1, NULL, WNOHANG) > 0);
 }
 
+ 
+
 void handle_shutdown(int sig)
 {
+    (void)sig;
+
     printf("Supervisor shutting down...\n");
-    unlink(CONTROL_PATH);   // clean socket
+
+    if (GLOBAL_CTX) {
+        bounded_buffer_begin_shutdown(&GLOBAL_CTX->log_buffer);
+        pthread_join(GLOBAL_CTX->logger_thread, NULL);
+        bounded_buffer_destroy(&GLOBAL_CTX->log_buffer);
+    }
+
+    unlink(CONTROL_PATH);
     exit(0);
 }
 
@@ -315,9 +329,24 @@ static void bounded_buffer_begin_shutdown(bounded_buffer_t *buffer)
  */
 int bounded_buffer_push(bounded_buffer_t *buffer, const log_item_t *item)
 {
-    (void)buffer;
-    (void)item;
-    return -1;
+    pthread_mutex_lock(&buffer->mutex);
+
+    while (buffer->count == LOG_BUFFER_CAPACITY && !buffer->shutting_down)
+        pthread_cond_wait(&buffer->not_full, &buffer->mutex);
+
+    if (buffer->shutting_down) {
+        pthread_mutex_unlock(&buffer->mutex);
+        return -1;
+    }
+
+    buffer->items[buffer->tail] = *item;
+    buffer->tail = (buffer->tail + 1) % LOG_BUFFER_CAPACITY;
+    buffer->count++;
+
+    pthread_cond_signal(&buffer->not_empty);
+    pthread_mutex_unlock(&buffer->mutex);
+
+    return 0;
 }
 
 /*
@@ -331,9 +360,24 @@ int bounded_buffer_push(bounded_buffer_t *buffer, const log_item_t *item)
  */
 int bounded_buffer_pop(bounded_buffer_t *buffer, log_item_t *item)
 {
-    (void)buffer;
-    (void)item;
-    return -1;
+    pthread_mutex_lock(&buffer->mutex);
+
+    while (buffer->count == 0 && !buffer->shutting_down)
+        pthread_cond_wait(&buffer->not_empty, &buffer->mutex);
+
+    if (buffer->count == 0 && buffer->shutting_down) {
+        pthread_mutex_unlock(&buffer->mutex);
+        return -1;
+    }
+
+    *item = buffer->items[buffer->head];
+    buffer->head = (buffer->head + 1) % LOG_BUFFER_CAPACITY;
+    buffer->count--;
+
+    pthread_cond_signal(&buffer->not_full);
+    pthread_mutex_unlock(&buffer->mutex);
+
+    return 0;
 }
 
 /*
@@ -347,10 +391,48 @@ int bounded_buffer_pop(bounded_buffer_t *buffer, log_item_t *item)
  */
 void *logging_thread(void *arg)
 {
-    (void)arg;
+    supervisor_ctx_t *ctx = (supervisor_ctx_t *)arg;
+    log_item_t item;
+
+    while (1) {
+        if (bounded_buffer_pop(&ctx->log_buffer, &item) != 0)
+            break;
+
+        char path[PATH_MAX];
+        snprintf(path, sizeof(path), "%s/%s.log", LOG_DIR, item.container_id);
+
+        FILE *fp = fopen(path, "a");
+        if (fp) {
+            fwrite(item.data, 1, item.length, fp);
+            fclose(fp);
+        }
+    }
+
     return NULL;
 }
 
+
+void *producer_thread(void *arg)
+{
+    int fd = *(int *)arg;
+    free(arg);
+
+    char buf[LOG_CHUNK_SIZE];
+
+    while (1) {
+        ssize_t n = read(fd, buf, sizeof(buf));
+        if (n <= 0) break;
+
+        log_item_t item;
+        strncpy(item.container_id, "default", CONTAINER_ID_LEN);
+        item.length = n;
+        memcpy(item.data, buf, n);
+        bounded_buffer_push(&GLOBAL_CTX->log_buffer, &item);
+    }
+
+    close(fd);
+    return NULL;
+}
 /*
  * TODO:
  * Implement the clone child entrypoint.
@@ -387,6 +469,10 @@ int child_fn(void *arg)
         return 1;
     }
 
+    dup2(config->log_write_fd, STDOUT_FILENO);
+dup2(config->log_write_fd, STDERR_FILENO);
+close(config->log_write_fd);
+    
   execlp(config->command, config->command, NULL);
 
     perror("exec failed");
@@ -477,6 +563,16 @@ static int run_supervisor(const char *rootfs)
     }
 
     printf("Supervisor listening on %s\n", CONTROL_PATH);
+
+    supervisor_ctx_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    GLOBAL_CTX = &ctx;
+
+    bounded_buffer_init(&ctx.log_buffer);
+
+    mkdir(LOG_DIR, 0777);
+
+    pthread_create(&ctx.logger_thread, NULL, logging_thread, &ctx);
 
     // ===== MAIN LOOP =====
     while (1) {
@@ -656,7 +752,6 @@ static int cmd_start(int argc, char *argv[])
     return send_control_request(&req);
 }
 
-
 static int cmd_run(int argc, char *argv[])
 {
     if (argc < 5) {
@@ -670,17 +765,25 @@ static int cmd_run(int argc, char *argv[])
     char *rootfs = argv[3];
     char *cmd = argv[4];
 
-    // allocate stack for clone
+    // ===== CREATE PIPE =====
+    int pipefd[2];
+    if (pipe(pipefd) < 0) {
+        perror("pipe");
+        return 1;
+    }
+
+    // ===== ALLOCATE STACK =====
     char *stack = malloc(STACK_SIZE);
     if (!stack) {
         perror("malloc");
         return 1;
     }
 
-    // config
+    // ===== CONFIG =====
     child_config_t *config = malloc(sizeof(child_config_t));
     if (!config) {
         perror("malloc");
+        free(stack);
         return 1;
     }
 
@@ -688,7 +791,9 @@ static int cmd_run(int argc, char *argv[])
     strncpy(config->rootfs, rootfs, PATH_MAX);
     strncpy(config->command, cmd, CHILD_COMMAND_LEN);
 
-    // create container
+    config->log_write_fd = pipefd[1];   // 🔥 for logging
+
+    // ===== CREATE CONTAINER =====
     pid_t pid = clone(child_fn,
                       stack + STACK_SIZE,
                       CLONE_NEWPID | CLONE_NEWNS | CLONE_NEWUTS | SIGCHLD,
@@ -696,10 +801,42 @@ static int cmd_run(int argc, char *argv[])
 
     if (pid < 0) {
         perror("clone");
+        free(stack);
+        free(config);
         return 1;
     }
 
+    int monitor_fd = open("/dev/container_monitor", O_RDWR);
+if (monitor_fd >= 0) {
+    if (register_with_monitor(monitor_fd, id, pid,
+                              DEFAULT_SOFT_LIMIT,
+                              DEFAULT_HARD_LIMIT) < 0) {
+        perror("monitor register");
+    }
+    close(monitor_fd);
+} else {
+    perror("open monitor");
+}
+
+    // ===== PARENT SIDE =====
+    close(pipefd[1]);  // parent does not write
+
+    // ===== START PRODUCER THREAD =====
+    pthread_t producer;
+    int *fd = malloc(sizeof(int));
+    if (!fd) {
+        perror("malloc");
+        return 1;
+    }
+
+    *fd = pipefd[0];
+    pthread_create(&producer, NULL, producer_thread, fd);
+
     printf("Started container %s with PID %d\n", id, pid);
+
+    // ===== CLEANUP (parent-side memory) =====
+    free(stack);
+    free(config);
 
     return pid;
 }
