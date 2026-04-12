@@ -68,10 +68,7 @@ typedef struct {
 container_t containers[MAX_CONTAINERS];
 int container_count = 0;
 
- typedef struct {
-    int fd;
-    char container_id[CONTAINER_ID_LEN];
-} producer_arg_t;
+
 
 
 typedef enum {
