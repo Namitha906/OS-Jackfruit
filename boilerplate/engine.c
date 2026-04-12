@@ -55,6 +55,11 @@ static int cmd_start(int argc, char *argv[]);
 #define MAX_CONTAINERS 10
 
 typedef struct {
+    int fd;
+    char container_id[CONTAINER_ID_LEN];
+} producer_arg_t;
+
+typedef struct {
     char id[32];
     pid_t pid;
     int running;
@@ -62,6 +67,12 @@ typedef struct {
 
 container_t containers[MAX_CONTAINERS];
 int container_count = 0;
+
+ typedef struct {
+    int fd;
+    char container_id[CONTAINER_ID_LEN];
+} producer_arg_t;
+
 
 typedef enum {
     CMD_SUPERVISOR = 0,
@@ -800,7 +811,7 @@ static int cmd_run(int argc, char *argv[])
     strncpy(config->rootfs, rootfs, PATH_MAX);
     strncpy(config->command, cmd, CHILD_COMMAND_LEN);
 
-    config->log_write_fd = pipefd[1];   // 🔥 for logging
+    config->log_write_fd = pipefd[1];
 
     // ===== CREATE CONTAINER =====
     pid_t pid = clone(child_fn,
@@ -815,35 +826,39 @@ static int cmd_run(int argc, char *argv[])
         return 1;
     }
 
+    // ===== REGISTER WITH MONITOR =====
     int monitor_fd = open("/dev/container_monitor", O_RDWR);
-if (monitor_fd >= 0) {
-    if (register_with_monitor(monitor_fd, id, pid,
-                              DEFAULT_SOFT_LIMIT,
-                              DEFAULT_HARD_LIMIT) < 0) {
-        perror("monitor register");
+    if (monitor_fd >= 0) {
+        if (register_with_monitor(monitor_fd, id, pid,
+                                  DEFAULT_SOFT_LIMIT,
+                                  DEFAULT_HARD_LIMIT) < 0) {
+            perror("monitor register");
+        }
+        close(monitor_fd);
+    } else {
+        perror("open monitor");
     }
-    close(monitor_fd);
-} else {
-    perror("open monitor");
-}
 
     // ===== PARENT SIDE =====
-    close(pipefd[1]);  // parent does not write
+    close(pipefd[1]);
 
     // ===== START PRODUCER THREAD =====
-   typedef struct {
-    int fd;
-    char container_id[CONTAINER_ID_LEN];
-} producer_arg_t;
+    pthread_t producer;
 
-   producer_arg_t *p = malloc(sizeof(producer_arg_t));
-   p->fd = pipefd[0];
-   strncpy(p->container_id, id, CONTAINER_ID_LEN);
+    producer_arg_t *p = malloc(sizeof(producer_arg_t));
+    if (!p) {
+        perror("malloc");
+        return 1;
+    }
+
+    p->fd = pipefd[0];
+    strncpy(p->container_id, id, CONTAINER_ID_LEN);
 
     pthread_create(&producer, NULL, producer_thread, p);
+
     printf("Started container %s with PID %d\n", id, pid);
 
-    // ===== CLEANUP (parent-side memory) =====
+    // ===== CLEANUP =====
     free(stack);
     free(config);
 
