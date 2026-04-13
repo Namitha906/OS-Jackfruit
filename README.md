@@ -69,7 +69,6 @@ The screenshot shows the output of a container (`ls` command) successfully captu
 
 ### 4. Scheduling experiments
 
-#### Experiment 1: CPU-bound workloads with different priorities
 
 #### Experiment 1: CPU-bound workloads with different priorities
 
