@@ -50,8 +50,8 @@ static int cmd_start(int argc, char *argv[]);
 #define CHILD_COMMAND_LEN 256
 #define LOG_CHUNK_SIZE 4096
 #define LOG_BUFFER_CAPACITY 16
-#define DEFAULT_SOFT_LIMIT (40UL << 20)
-#define DEFAULT_HARD_LIMIT (64UL << 20)
+#define DEFAULT_SOFT_LIMIT (5UL << 20)   // 5 MB
+#define DEFAULT_HARD_LIMIT (10UL << 20)  // 10 MB
 #define MAX_CONTAINERS 10
 
 typedef struct {
