@@ -98,16 +98,135 @@ A CPU-bound container (`yes > /dev/null`) is executed alongside an I/O-bound con
 
 ## 4. Engineering Analysis
 
-(To be added)
+This project demonstrates several core operating system concepts including process isolation, inter-process communication (IPC), kernel-user interaction, and scheduling behavior.
+
+### Process Isolation (Namespaces)
+Each container is created using Linux namespaces (PID, UTS, and mount namespaces). This ensures that processes inside a container have their own isolated environment, including separate process IDs and filesystem views. This mimics lightweight containerization similar to Docker.
+
+### Supervisor Architecture
+A central supervisor process manages all containers. It is responsible for:
+- Creating containers using `clone()`
+- Tracking container metadata (ID, PID, state)
+- Handling user commands via a control interface
+
+This reflects real-world container runtimes where a daemon manages multiple containers.
+
+### Inter-Process Communication (IPC)
+Two IPC mechanisms are used:
+1. **Pipes** – to capture container stdout/stderr for logging
+2. **Unix domain sockets** – for communication between CLI and supervisor
+
+This separation ensures modularity and efficient communication.
+
+### Logging System (Producer-Consumer Model)
+Container outputs are not written directly to the terminal. Instead:
+- Producer threads read output from pipes
+- Data is inserted into a bounded buffer
+- Consumer threads write logs to files
+
+This prevents blocking and ensures no data loss under high load.
+
+### Kernel-Level Monitoring
+A kernel module monitors container memory usage. The supervisor registers containers using ioctl calls. The kernel periodically checks memory usage and enforces limits:
+- Soft limit → warning
+- Hard limit → process termination
+
+This demonstrates interaction between user-space and kernel-space components.
+
+### Scheduling Behavior
+The project is used as a platform to observe Linux scheduling. By running CPU-bound and I/O-bound workloads with different priorities, we analyze how the scheduler allocates CPU time fairly.
 
 ---
 
 ## 5. Design Decisions and Tradeoffs
 
-(To be added)
+### Namespace Isolation
+**Choice:** Use Linux namespaces instead of full virtualization  
+**Tradeoff:** Lightweight but less secure than full VMs  
+**Justification:** Efficient and aligns with modern container systems like Docker
 
+---
+
+### Supervisor Design
+**Choice:** Single supervisor managing all containers  
+**Tradeoff:** Centralized control can be a bottleneck  
+**Justification:** Simplifies container tracking and control logic
+
+---
+
+### Logging System (Bounded Buffer)
+**Choice:** Producer-consumer model with bounded buffer  
+**Tradeoff:** Requires synchronization (mutex + condition variables)  
+**Justification:** Prevents data loss and avoids blocking when handling high log volume
+
+---
+
+### IPC Mechanisms
+**Choice:** Pipes + Unix domain sockets  
+**Tradeoff:** More complex than a single IPC method  
+**Justification:** Separates concerns (logging vs control communication)
+
+---
+
+### Kernel Monitoring (LKM)
+**Choice:** Implement monitoring in kernel space  
+**Tradeoff:** More complex and harder to debug  
+**Justification:** Direct access to process memory usage and realistic OS-level enforcement
+
+---
+
+### Scheduling Experiments
+**Choice:** Use real Linux scheduler instead of simulating one  
+**Tradeoff:** Less control over internal scheduling logic  
+**Justification:** Provides real-world insights into Linux CFS behavior
 ---
 
 ## 6. Scheduler Experiment Results
 
-(To be added)
+### Experiment 1: CPU-bound workloads with different priorities
+
+Two CPU-bound processes (`yes`) were executed with different nice values:
+- Process 1: nice = 0 (higher priority)
+- Process 2: nice = 10 (lower priority)
+
+**Observation:**
+The process with lower nice value consistently received more CPU time, as shown in the `top` output.
+
+| Process | Nice Value | CPU Usage |
+|--------|-----------|----------|
+| yes (high priority) | 0 | Higher |
+| yes (low priority)  | 10 | Lower |
+
+**Conclusion:**
+Linux Completely Fair Scheduler (CFS) allocates CPU time based on priority, favoring processes with lower nice values.
+
+---
+
+### Experiment 2: CPU-bound vs I/O-bound workloads
+
+Two workloads were run simultaneously:
+- CPU-bound: `yes > /dev/null`
+- I/O-bound: `sleep 1`
+
+**Observation:**
+The CPU-bound process consumed most of the CPU, while the I/O-bound process used negligible CPU.
+
+| Process Type | CPU Usage |
+|-------------|----------|
+| CPU-bound   | High     |
+| I/O-bound   | Very Low |
+
+**Conclusion:**
+The scheduler prioritizes active CPU-demanding processes, while I/O-bound processes yield CPU time when waiting, improving system responsiveness.
+
+---
+
+### Overall Insight
+
+The experiments demonstrate that:
+- Linux scheduler balances fairness and efficiency
+- Priority (nice value) directly affects CPU allocation
+- CPU-bound processes dominate CPU usage
+- I/O-bound processes allow better multitasking
+
+These results align with the behavior of the Linux Completely Fair Scheduler (CFS).
