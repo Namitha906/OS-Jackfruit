@@ -79,7 +79,8 @@ Two CPU-bound containers are executed concurrently using the `yes` command. Diff
 
 #### Experiment 2: CPU-bound vs I/O-bound workload
 
-![CPU vs IO](![WhatsApp Image 2026-04-13 at 11 35 53 AM (2)](https://github.com/user-attachments/assets/1884832a-8412-4213-82b7-c39eae1c7c9f)
+![CPU vs IO]
+(![WhatsApp Image 2026-04-13 at 11 35 53 AM (2)](https://github.com/user-attachments/assets/1884832a-8412-4213-82b7-c39eae1c7c9f)
 ![WhatsApp Image 2026-04-13 at 11 35 53 AM (1)](https://github.com/user-attachments/assets/3581f310-d319-422b-860e-4eccf1cb8a8b)
 ![WhatsApp Image 2026-04-13 at 11 35 53 AM](https://github.com/user-attachments/assets/0d52a118-d6ad-4fd8-9674-cc41c548d70b)
 )
