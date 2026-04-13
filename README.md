@@ -56,6 +56,36 @@ Two containers (c1 and c2) are launched under a single supervisor process. The o
 
 The supervisor runs as a long-lived process and listens on a UNIX domain socket. CLI commands such as `start` are issued from a separate terminal and sent to the supervisor through the control channel. The supervisor processes the request and responds appropriately, demonstrating successful inter-process communication (IPC) between the CLI and the supervisor.
 
+### 3. Bounded-buffer logging and IPC
+
+![Logging Terminal 1](![WhatsApp Image 2026-04-12 at 7 01 01 PM](https://github.com/user-attachments/assets/ee60db53-ed1b-4206-98ef-1b1f15866f5b)
+)
+![Logging Terminal 2](![WhatsApp Image 2026-04-12 at 7 01 01 PM (1)](https://github.com/user-attachments/assets/a8071768-871c-47cf-bad5-2f357f18b18c)
+)
+
+Container output (stdout/stderr) is captured using pipes and processed through a producer-consumer logging pipeline. A producer thread reads data from the container’s output stream and inserts it into a bounded buffer, while a consumer thread writes the data to persistent per-container log files.
+
+The screenshot shows the output of a container (`ls` command) successfully captured in `logs/c1.log`, demonstrating correct logging, synchronization, and IPC between container processes and the supervisor.
+
+### 4. Scheduling experiments
+
+#### Experiment 1: CPU-bound workloads with different priorities
+
+![Alpha vs Beta](add-image-link-1)
+
+Two CPU-bound containers are executed concurrently using the `yes` command. Different scheduling priorities are assigned using `nice` values (0 and 10). The container with lower nice value (higher priority) receives a greater share of CPU time, as observed in the `top` output.
+
+---
+
+#### Experiment 2: CPU-bound vs I/O-bound workload
+
+![CPU vs IO](![WhatsApp Image 2026-04-13 at 11 35 53 AM (2)](https://github.com/user-attachments/assets/1884832a-8412-4213-82b7-c39eae1c7c9f)
+![WhatsApp Image 2026-04-13 at 11 35 53 AM (1)](https://github.com/user-attachments/assets/3581f310-d319-422b-860e-4eccf1cb8a8b)
+![WhatsApp Image 2026-04-13 at 11 35 53 AM](https://github.com/user-attachments/assets/0d52a118-d6ad-4fd8-9674-cc41c548d70b)
+)
+
+A CPU-bound container (`yes > /dev/null`) is executed alongside an I/O-bound container (`sleep 1`). The CPU-bound process consumes significantly more CPU resources, while the I/O-bound process remains mostly idle. This demonstrates how the Linux scheduler prioritizes CPU-intensive workloads differently from I/O-bound ones.
+
 
 
 
