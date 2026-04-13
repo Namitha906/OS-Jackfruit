@@ -71,9 +71,14 @@ The screenshot shows the output of a container (`ls` command) successfully captu
 
 #### Experiment 1: CPU-bound workloads with different priorities
 
-![Alpha vs Beta](add-image-link-1)
+#### Experiment 1: CPU-bound workloads with different priorities
 
-Two CPU-bound containers are executed concurrently using the `yes` command. Different scheduling priorities are assigned using `nice` values (0 and 10). The container with lower nice value (higher priority) receives a greater share of CPU time, as observed in the `top` output.
+![Priority Scheduling](<img width="1031" height="706" alt="image" src="https://github.com/user-attachments/assets/89cdbae4-1f31-4284-9c42-c1144302b1e5" />
+)
+
+Two CPU-bound processes (`yes`) were executed with different nice values (0 and 10). The `top` output shows that processes with lower nice value (higher priority) receive a larger share of CPU time, while higher nice value processes receive less CPU.
+
+This demonstrates how the Linux Completely Fair Scheduler (CFS) distributes CPU time based on process priority.
 
 ---
 
