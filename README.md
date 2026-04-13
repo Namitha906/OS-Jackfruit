@@ -176,7 +176,7 @@ The project is used as a platform to observe Linux scheduling. By running CPU-bo
 ---
 
 ### Scheduling Experiments
-**Choice:** Use real Linux scheduler instead of simulating one  
+**Choice:**  Use real Linux scheduler instead of simulating one  
 **Tradeoff:** Less control over internal scheduling logic  
 **Justification:** Provides real-world insights into Linux CFS behavior
 ---
