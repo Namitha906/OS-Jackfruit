@@ -72,7 +72,7 @@ The screenshot shows the output of a container (`ls` command) successfully captu
 
 #### Experiment 1: CPU-bound workloads with different priorities
 
-![Priority Scheduling](<img width="1031" height="706" alt="image" src="https://github.com/user-attachments/assets/89cdbae4-1f31-4284-9c42-c1144302b1e5" />
+![Priority Scheduling](![WhatsApp Image 2026-04-13 at 12 02 16 PM](https://github.com/user-attachments/assets/9ee5e3da-1038-4bf0-9be2-f2ad48de572a)
 )
 
 Two CPU-bound processes (`yes`) were executed with different nice values (0 and 10). The `top` output shows that processes with lower nice value (higher priority) receive a larger share of CPU time, while higher nice value processes receive less CPU.
