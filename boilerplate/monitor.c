@@ -31,8 +31,8 @@ static struct cdev c_dev;
 static int major;
 
 /* ================= IOCTL ================= */
-#define IOCTL_ADD 1
-#define IOCTL_REMOVE 2
+#define IOCTL_ADD 0
+#define IOCTL_REMOVE 1
 
 struct container_info {
     pid_t pid;
