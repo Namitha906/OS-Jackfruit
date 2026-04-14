@@ -3,9 +3,9 @@
 
 int main() {
     while (1) {
-        void *p = malloc(512 * 1024); // 512 KB
+        void *p = malloc(256 * 1024); // slower growth
         if (!p) break;
-        usleep(200000); // 0.2 sec delay
+        usleep(500000); // 0.5 sec delay
     }
     return 0;
 }
