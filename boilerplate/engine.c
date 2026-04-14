@@ -863,18 +863,16 @@ static int cmd_run(int argc, char *argv[])
 }
 
 
+
 static int cmd_ps(void)
 {
-    printf("ID\tPID\tSTATUS\n");
+    control_request_t req;
+    memset(&req, 0, sizeof(req));
 
-    for (int i = 0; i < container_count; i++) {
-        printf("%s\t%d\t%s\n",
-               containers[i].id,
-               containers[i].pid,
-               containers[i].running ? "running" : "stopped");
-    }
+    req.kind = CMD_PS;
 
-    return 0;
+    return send_control_request(&req);
+}
 
     /*
      * TODO:
