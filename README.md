@@ -91,6 +91,26 @@ This demonstrates how the Linux Completely Fair Scheduler (CFS) distributes CPU 
 
 A CPU-bound container (`yes > /dev/null`) is executed alongside an I/O-bound container (`sleep 1`). The CPU-bound process consumes significantly more CPU resources, while the I/O-bound process remains mostly idle. This demonstrates how the Linux scheduler prioritizes CPU-intensive workloads differently from I/O-bound ones.
 
+## 5. Clean Teardown
+
+The system ensures proper cleanup of containers and resources during shutdown.
+
+* Containers are started and stopped using the CLI, and their state is correctly reflected using the `ps` command.
+* After stopping a container, no running processes remain (`ps aux | grep c1` shows no active processes).
+* Zombie processes were checked using `ps aux | grep Z`, and none were found.
+* Logging and supervisor threads terminate cleanly when containers exit.
+
+### Conclusion
+
+The runtime successfully performs clean teardown with:
+
+* Proper container termination
+* Accurate metadata updates
+* No zombie or leftover processes
+  ![WhatsApp Image 2026-04-14 at 11 11 47 AM](https://github.com/user-attachments/assets/34653923-87c0-40df-8838-b99bd57f6991)
+
+
+
 
 
 
