@@ -91,7 +91,7 @@ This demonstrates how the Linux Completely Fair Scheduler (CFS) distributes CPU 
 
 A CPU-bound container (`yes > /dev/null`) is executed alongside an I/O-bound container (`sleep 1`). The CPU-bound process consumes significantly more CPU resources, while the I/O-bound process remains mostly idle. This demonstrates how the Linux scheduler prioritizes CPU-intensive workloads differently from I/O-bound ones.
 
-## 5. Clean Teardown
+### 5. Clean Teardown
 
 The system ensures proper cleanup of containers and resources during shutdown.
 
@@ -109,7 +109,7 @@ The runtime successfully performs clean teardown with:
 * No zombie or leftover processes
   ![WhatsApp Image 2026-04-14 at 11 11 47 AM](https://github.com/user-attachments/assets/34653923-87c0-40df-8838-b99bd57f6991)
 
-## 6. Soft-limit and Hard-limit Enforcement
+### 6. Soft-limit and Hard-limit Enforcement
 
 To evaluate memory control, a memory-intensive program (memory_hog) was executed inside a container with defined soft and hard limits.
 ![WhatsApp Image 2026-04-15 at 10 41 04 AM](https://github.com/user-attachments/assets/ab9161b5-380b-45da-91c3-4ff04475f1bc)
