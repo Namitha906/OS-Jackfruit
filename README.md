@@ -109,20 +109,6 @@ The runtime successfully performs clean teardown with:
 * No zombie or leftover processes
   ![WhatsApp Image 2026-04-14 at 11 11 47 AM](https://github.com/user-attachments/assets/34653923-87c0-40df-8838-b99bd57f6991)
 
-## 6. Soft and Hard Limit
-To evaluate memory control, a memory-intensive program (memory_hog) was executed inside a container with defined soft and hard limits.
-
-Command Used
-sudo ./engine start alpha ./rootfs-alpha /memory_hog --soft-mib 30 --hard-mib 45
-
-Explanation
-
-  -Soft Limit (30 MiB):
-    When the container exceeded this limit, a warning was generated, but execution continued.
-    
-  -Hard Limit (45 MiB):
-   When memory usage exceeded this threshold, the container process was terminated.
-   ![WhatsApp Image 2026-04-15 at 10 41 04 AM](https://github.com/user-attachments/assets/5b8f5978-85c6-4c26-b128-6378d771dfad)
 
 
 
