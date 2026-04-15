@@ -109,21 +109,6 @@ The runtime successfully performs clean teardown with:
 * No zombie or leftover processes
   ![WhatsApp Image 2026-04-14 at 11 11 47 AM](https://github.com/user-attachments/assets/34653923-87c0-40df-8838-b99bd57f6991)
 
-  
-
-### 6. Soft-limit and Hard-limit Enforcement
-
-To evaluate memory control, a memory-intensive program (memory_hog) was executed inside a container with defined soft and hard limits.
-![WhatsApp Image 2026-04-15 at 10 41 04 AM](https://github.com/user-attachments/assets/ab9161b5-380b-45da-91c3-4ff04475f1bc)
-Explanation
-Soft Limit (30 MiB):
-When the container exceeded this limit, a warning was generated, but execution continued.
-Hard Limit (45 MiB):
-When memory usage exceeded this threshold, the container process was terminated.
-
-
-
-
 
 ---
 
