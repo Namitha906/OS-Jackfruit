@@ -9,35 +9,178 @@
 
 ---
 
-## 2. Build, Load, and Run Instructions
+# 🧪 OS-Jackfruit Project – Task Execution Guide
 
-### Build
+## 📌 Setup
 
+```bash
+cd OS-Jackfruit
 make
-
-
-### Start Supervisor
-
-sudo ./engine supervisor ./rootfs-base
-
-
-### Run Containers
-
-sudo ./engine start c1 ./rootfs-alpha ls
-sudo ./engine start c2 ./rootfs-beta ls
-
-
-### List Containers
-
-sudo ./engine ps
-
-
-### Stop Container
-
-sudo ./engine stop c1
-
+```
 
 ---
+
+# ✅ Task 1: Start a Container
+
+```bash
+sudo ./engine start c1 ./rootfs-alpha /bin/sh
+```
+
+Check:
+
+```bash
+sudo ./engine ps
+```
+
+Expected Output:
+
+```
+ID   PID    STATUS
+c1   <pid>  running
+```
+
+---
+
+# ✅ Task 2: Stop Container
+
+```bash
+sudo ./engine stop c1
+sudo ./engine ps
+```
+
+Expected:
+
+```
+c1   <pid>  stopped
+```
+
+---
+
+# ✅ Task 3: Logging (2 Terminals)
+
+### 🔹 Terminal 1 (Supervisor)
+
+```bash
+sudo ./engine supervisor ./rootfs-alpha
+```
+
+### 🔹 Terminal 2 (Run container)
+
+```bash
+sudo ./engine start c1 ./rootfs-alpha ls
+cat logs/c1.log
+```
+
+Expected Output:
+
+```
+bin
+dev
+etc
+home
+...
+```
+
+---
+
+# ✅ Task 4: CPU Scheduling (CPU Hog)
+
+```bash
+sudo ./engine start cpu1 ./rootfs-alpha /cpu_hog
+```
+
+Check CPU usage:
+
+```bash
+top
+```
+
+Expected:
+
+```
+cpu_hog  → high CPU usage (~90%+)
+```
+
+---
+
+# ✅ Task 5: I/O Simulation (IO Pulse)
+
+```bash
+sudo ./engine start io1 ./rootfs-alpha /io_pulse
+```
+
+Check zombie state:
+
+```bash
+ps aux | grep Z
+```
+
+Expected:
+
+```
+Z (zombie process visible)
+```
+
+---
+
+# ✅ Task 6: Memory Monitoring (Soft & Hard Limits)
+
+## 🔹 Step 1: Load Kernel Module
+
+```bash
+sudo insmod monitor.ko
+```
+
+---
+
+## 🔹 Step 2: Run Container with Limits
+
+```bash
+sudo ./engine run alpha ./rootfs-alpha /memory_hog --soft-mib 5 --hard-mib 15
+```
+
+---
+
+## 🔹 Step 3: Check Kernel Logs
+
+```bash
+sudo dmesg | tail
+```
+
+---
+
+## ✅ Expected Output
+
+```
+[container_monitor] Registered container=alpha pid=<pid> soft=5242880 hard=10485760
+[container_monitor] SOFT LIMIT container=alpha pid=<pid> rss=5316608 limit=5242880
+[container_monitor] HARD LIMIT container=alpha pid=<pid> rss=10559488 limit=10485760
+```
+
+---
+
+# 🧹 Cleanup
+
+```bash
+sudo ./engine stop alpha 2>/dev/null
+sudo rmmod monitor 2>/dev/null
+rm -rf logs/*
+make clean
+```
+
+---
+
+# 🧠 Summary
+
+* Containers are created and managed using `engine`
+* CPU hog simulates heavy CPU load
+* IO pulse demonstrates process states
+* Kernel module monitors memory usage
+* Soft limit → warning
+* Hard limit → enforcement
+
+---
+
 
 ## 3. Demo with Screenshots
 ### 1. Multi-container supervision and metadata tracking
