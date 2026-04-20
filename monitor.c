@@ -1,4 +1,4 @@
-```c
+
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -232,6 +232,6 @@ static void __exit monitor_exit(void)
 
 module_init(monitor_init);
 module_exit(monitor_exit);
-```
+
 
 
