@@ -16,6 +16,7 @@
 #include <linux/device.h>
 #include <linux/cdev.h>
 #include <linux/version.h>
+#include "monitor_ioctl.h"
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("Container Memory Monitor");
@@ -181,22 +182,24 @@ static long monitor_ioctl(struct file *file, unsigned int cmd, unsigned long arg
         return -EFAULT;
 
     switch (cmd) {
-        case IOCTL_ADD:
-            add_container(
-    info.pid,
-    info.container_id,
-    info.soft_limit_bytes,
-    info.hard_limit_bytes
-);
-            break;
+    case MONITOR_REGISTER:
+        add_container(
+            info.pid,
+            info.container_id,
+            info.soft_limit_bytes,
+            info.hard_limit_bytes
+        );
+        break;
 
-        case IOCTL_REMOVE:
-            remove_container(info.pid);
-            break;
+    case MONITOR_UNREGISTER:
+        remove_container(info.pid);
+        break;
 
-        default:
-            return -EINVAL;
-    }
+    default:
+        return -EINVAL;
+}
+    
+          
 
     return 0;
 }
