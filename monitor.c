@@ -175,14 +175,19 @@ static void monitor_containers(struct timer_list *t)
 /* ================= IOCTL ================= */
 static long monitor_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
-    struct container_info info;
+   struct monitor_request info;
 
     if (copy_from_user(&info, (void __user *)arg, sizeof(info)))
         return -EFAULT;
 
     switch (cmd) {
         case IOCTL_ADD:
-            add_container(info.pid, info.id, info.soft_limit, info.hard_limit);
+            add_container(
+    info.pid,
+    info.container_id,
+    info.soft_limit_bytes,
+    info.hard_limit_bytes
+);
             break;
 
         case IOCTL_REMOVE:
