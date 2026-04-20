@@ -31,14 +31,15 @@ static struct cdev c_dev;
 static int major;
 
 /* ================= IOCTL ================= */
-#define IOCTL_ADD 0
-#define IOCTL_REMOVE 1
+#define MONITOR_MAGIC 'M'
+#define MONITOR_REGISTER _IOW(MONITOR_MAGIC, 1, struct monitor_request)
+#define MONITOR_UNREGISTER _IOW(MONITOR_MAGIC, 2, struct monitor_request)
 
-struct container_info {
+struct monitor_request {
     pid_t pid;
-    char id[32];
-    long soft_limit;
-    long hard_limit;
+    unsigned long soft_limit_bytes;
+    unsigned long hard_limit_bytes;
+    char container_id[32];
 };
 
 /* =========================================================
