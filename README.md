@@ -4,7 +4,7 @@
 
 - Member 1: Namitha N Reddy  
 - SRN: PES2UG24AM098
-- Member 3: Nanditha A
+- Member 2: Nanditha A
 - SRN: PES2UG24AM100
 
 ---
