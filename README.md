@@ -113,7 +113,8 @@ The runtime successfully performs clean teardown with:
 
 To evaluate memory control, a memory-intensive program (memory_hog) was executed inside a container with defined soft and hard limits.
 
-![WhatsApp Image 2026-04-15 at 10 41 04 AM](https://github.com/user-attachments/assets/c6a2bbcb-153f-4b97-b510-de3a9abb8e1a)
+<img width="818" height="576" alt="WhatsApp Image 2026-04-20 at 8 48 45 PM" src="https://github.com/user-attachments/assets/755cb5ca-4edd-40b1-95de-af8396153fe9" />
+
 
 
 
