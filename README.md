@@ -24,6 +24,7 @@ make
 
 ```bash
 sudo ./engine start c1 ./rootfs-alpha /bin/sh
+sudo ./engine start beta ./rootfs-alpha /bin/sh
 ```
 
 Check:
@@ -44,7 +45,7 @@ c1   <pid>  running
 # Task 2: Stop Container
 
 ```bash
-sudo ./engine stop c1
+sudo ./engine stop alpha
 sudo ./engine ps
 ```
 
