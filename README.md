@@ -9,9 +9,9 @@
 
 ---
 
-# 🧪 OS-Jackfruit Project – Task Execution Guide
+# OS-Jackfruit Project – Task Execution Guide
 
-## 📌 Setup
+##  Setup
 
 ```bash
 cd OS-Jackfruit
@@ -20,7 +20,7 @@ make
 
 ---
 
-# ✅ Task 1: Start a Container
+#Task 1: Start a Container
 
 ```bash
 sudo ./engine start c1 ./rootfs-alpha /bin/sh
@@ -32,7 +32,7 @@ Check:
 sudo ./engine ps
 ```
 
-Expected Output:
+Output:
 
 ```
 ID   PID    STATUS
@@ -41,14 +41,14 @@ c1   <pid>  running
 
 ---
 
-# ✅ Task 2: Stop Container
+# Task 2: Stop Container
 
 ```bash
 sudo ./engine stop c1
 sudo ./engine ps
 ```
 
-Expected:
+Output:
 
 ```
 c1   <pid>  stopped
@@ -56,22 +56,22 @@ c1   <pid>  stopped
 
 ---
 
-# ✅ Task 3: Logging (2 Terminals)
+# Task 3: Logging (2 Terminals)
 
-### 🔹 Terminal 1 (Supervisor)
+### Terminal 1 (Supervisor)
 
 ```bash
 sudo ./engine supervisor ./rootfs-alpha
 ```
 
-### 🔹 Terminal 2 (Run container)
+### Terminal 2 (Run container)
 
 ```bash
 sudo ./engine start c1 ./rootfs-alpha ls
 cat logs/c1.log
 ```
 
-Expected Output:
+Output:
 
 ```
 bin
@@ -83,7 +83,7 @@ home
 
 ---
 
-# ✅ Task 4: CPU Scheduling (CPU Hog)
+# Task 4: CPU Scheduling (CPU Hog)
 
 ```bash
 sudo ./engine start cpu1 ./rootfs-alpha /cpu_hog
@@ -103,7 +103,7 @@ cpu_hog  → high CPU usage (~90%+)
 
 ---
 
-# ✅ Task 5: I/O Simulation (IO Pulse)
+# Task 5: I/O Simulation (IO Pulse)
 
 ```bash
 sudo ./engine start io1 ./rootfs-alpha /io_pulse
@@ -123,9 +123,9 @@ Z (zombie process visible)
 
 ---
 
-# ✅ Task 6: Memory Monitoring (Soft & Hard Limits)
+# Task 6: Memory Monitoring (Soft & Hard Limits)
 
-## 🔹 Step 1: Load Kernel Module
+## Step 1: Load Kernel Module
 
 ```bash
 sudo insmod monitor.ko
@@ -133,7 +133,7 @@ sudo insmod monitor.ko
 
 ---
 
-## 🔹 Step 2: Run Container with Limits
+## Step 2: Run Container with Limits
 
 ```bash
 sudo ./engine run alpha ./rootfs-alpha /memory_hog --soft-mib 5 --hard-mib 15
@@ -141,7 +141,7 @@ sudo ./engine run alpha ./rootfs-alpha /memory_hog --soft-mib 5 --hard-mib 15
 
 ---
 
-## 🔹 Step 3: Check Kernel Logs
+## Step 3: Check Kernel Logs
 
 ```bash
 sudo dmesg | tail
@@ -149,7 +149,7 @@ sudo dmesg | tail
 
 ---
 
-## ✅ Expected Output
+##  Output
 
 ```
 [container_monitor] Registered container=alpha pid=<pid> soft=5242880 hard=10485760
@@ -159,7 +159,7 @@ sudo dmesg | tail
 
 ---
 
-# 🧹 Cleanup
+# Cleanup
 
 ```bash
 sudo ./engine stop alpha 2>/dev/null
@@ -170,7 +170,7 @@ make clean
 
 ---
 
-# 🧠 Summary
+#  Summary
 
 * Containers are created and managed using `engine`
 * CPU hog simulates heavy CPU load
