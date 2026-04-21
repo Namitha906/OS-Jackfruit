@@ -138,7 +138,8 @@ sudo insmod monitor.ko
 ## Step 2: Run Container with Limits
 
 ```bash
-sudo ./engine run alpha ./rootfs-alpha /memory_hog --soft-mib 5 --hard-mib 15
+sudo ./engine run alpha ./rootfs-alpha /memory_hog --soft-mib 5 --hard-mib 10
+sudo ./engine run beta  ./rootfs-alpha /memory_hog --soft-mib 5 --hard-mib 10
 ```
 
 ---
