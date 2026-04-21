@@ -16,6 +16,7 @@
 ```bash
 cd OS-Jackfruit
 make
+sudo ./engine supervisor ./rootfs-alpha
 ```
 
 ---
@@ -23,7 +24,7 @@ make
 #Task 1: Start a Container
 
 ```bash
-sudo ./engine start c1 ./rootfs-alpha /bin/sh
+sudo ./engine start alpha ./rootfs-alpha /bin/sh
 sudo ./engine start beta ./rootfs-alpha /bin/sh
 ```
 
